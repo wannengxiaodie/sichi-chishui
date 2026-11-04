@@ -222,14 +222,15 @@
       <p class="sch-title">来回穿插 · 路线示意</p>
       <svg class="sch-svg" viewBox="0 0 1000 280" role="img" aria-label="四渡赤水往返示意">
         <defs>
-          <marker id="schArrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="5.6" markerHeight="5.6" orient="auto">
-            <path d="M10 5 L2.9 0.5 L4.55 5 L2.9 9.5 Z" fill="#d4553f"/>
+          <marker id="schArrow" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="strokeWidth" markerWidth="3.3" markerHeight="3.3" orient="auto">
+            <path d="M10 5 L1.9 0.4 C4.7 2.3 5.6 3.3 5 5 C5.6 6.7 4.7 7.7 1.9 9.6 Z" fill="#d4553f"/>
           </marker>
         </defs>
         <line x1="500" y1="30" x2="500" y2="252" stroke="#c9a961" stroke-opacity=".4" stroke-width="1.6" stroke-dasharray="4 8"/>
         <text x="500" y="20" text-anchor="middle" fill="#9c8d75" font-size="13" letter-spacing="3">赤 水 河</text>
 
         <g class="sch-route" data-cross="c1" tabindex="0" role="button" aria-label="一渡赤水，1935年1月29日，西进川南">
+          <path class="sch-hit" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96"/>
           <path id="schP1" class="sch-halo" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96"/>
           <path class="sch-line" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96" marker-end="url(#schArrow)"/>
           <circle class="sch-dot" r="2.1" fill="#ffc2a6">
@@ -238,6 +239,7 @@
         </g>
 
         <g class="sch-route" data-cross="c2" tabindex="0" role="button" aria-label="二渡赤水，1935年2月18日，东返黔北">
+          <path class="sch-hit" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136"/>
           <path id="schP2" class="sch-halo" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136"/>
           <path class="sch-line" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136" marker-end="url(#schArrow)"/>
           <circle class="sch-dot" r="2.1" fill="#ffc2a6">
@@ -246,6 +248,7 @@
         </g>
 
         <g class="sch-route" data-cross="c3" tabindex="0" role="button" aria-label="三渡赤水，1935年3月16日，再进川南">
+          <path class="sch-hit" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182"/>
           <path id="schP3" class="sch-halo" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182"/>
           <path class="sch-line" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182" marker-end="url(#schArrow)"/>
           <circle class="sch-dot" r="2.1" fill="#ffc2a6">
@@ -254,6 +257,7 @@
         </g>
 
         <g class="sch-route" data-cross="c4" tabindex="0" role="button" aria-label="四渡赤水，1935年3月21日，东返后南下乌江">
+          <path class="sch-hit" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222"/>
           <path id="schP4" class="sch-halo" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222"/>
           <path class="sch-line" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222" marker-end="url(#schArrow)"/>
           <circle class="sch-dot" r="2.1" fill="#ffc2a6">
