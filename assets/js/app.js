@@ -182,11 +182,34 @@
   const narrStopBtn = $('#narrStop');
   const narrRate = $('#narrRate');
   const narrVol = $('#narrVol');
+  const narrPace = $('#narrPace');
+  const narrVoiceSel = $('#narrVoice');
   const synth = window.speechSynthesis || null;
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 隐私模式忽略 */ } }
   };
+
+  /* 节奏档位：只调整停顿与基准语速，不改史实顺序 */
+  const PACES = {
+    calm: { label: '舒缓', dwell: 1.8, rateMul: 0.88 },
+    normal: { label: '标准', dwell: 1.5, rateMul: 1.0 },
+    tight: { label: '紧凑', dwell: 1.2, rateMul: 1.12 }
+  };
+  let paceKey = store.get('cs_narr_pace', 'normal');
+  if (!PACES[paceKey]) paceKey = 'normal';
+  const paceOf = () => PACES[paceKey] || PACES.normal;
+  // 中文基准约 4.45 字/秒（rate=1）；浏览器对 rate 的响应弱于标称值，用 0.45 次幂轻微缩放
+  const BASE_CPS = 4.45;
+  const TONE_RATE = 0.92; // 略慢以稳节奏，同时决定解说时长
+  const TONE_PITCH = 0.98;
+  const effRate = () => clamp(narrRateVal * paceOf().rateMul * TONE_RATE, 0.6, 1.2);
+  function estSec(id) {
+    const item = NARR_MAP[id];
+    if (!item) return 8;
+    if (typeof item.duration === 'number' && item.duration > 0) return item.duration;
+    return Math.max(8, item.text.length / (BASE_CPS * Math.pow(effRate(), 0.45)));
+  }
 
   let narrOn = store.get('cs_narr_on', '1') !== '0';
   let narrRateVal = parseFloat(store.get('cs_narr_rate', '1')) || 1;
@@ -196,9 +219,27 @@
   let narrSpeaking = false;
   let introShown = false;
   let zhVoice = null;
+  let zhVoices = [];
   let noZhVoice = false;
   let utter = null;
   let narrAudio = null;
+  // Web Speech API 没有性别字段，只能用名字白名单近似判断女声
+  const FEMALE_RE = /(ting-ting|mei-jia|huihui|yaoyao|xiaoxiao|sin-ji|婷婷|美嘉|慧慧|瑶瑶|晓晓|女)/i;
+  let voiceKey = store.get('cs_voice_key', '') || '';
+  const vKey = (v) => (v.name || '') + '|' + (v.lang || '');
+
+  function pickVoice(list, key) {
+    if (!list.length) return null;
+    if (key) {
+      const hit = list.find((v) => vKey(v) === key);
+      if (hit) return hit;
+    }
+    const female = list.find((v) => FEMALE_RE.test(v.name || ''));
+    if (female) return female;
+    const local = list.find((v) => v.localService === true);
+    if (local) return local;
+    return list[0];
+  }
 
   function updateNarrControls() {
     narrToggle.textContent = narrOn ? '解说 开' : '解说 关';
@@ -206,19 +247,42 @@
     narrSpeakBtn.disabled = noZhVoice;
     narrStopBtn.disabled = noZhVoice;
     narrNote.hidden = !noZhVoice;
-    if (noZhVoice) narrNote.textContent = '当前系统未提供中文语音，已降级为文字解说。';
+    if (noZhVoice) narrNote.textContent = '当前系统未提供中文语音，可在系统中下载中文语音后在此选择。';
+  }
+
+  function renderVoiceList() {
+    if (!narrVoiceSel) return;
+    narrVoiceSel.innerHTML = '';
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = zhVoices.length
+      ? ('自动（优先女声' + (zhVoice && !voiceKey ? '：' + (zhVoice.name || '') : '') + '）')
+      : '无中文语音';
+    narrVoiceSel.appendChild(auto);
+    zhVoices.forEach((v) => {
+      const o = document.createElement('option');
+      o.value = vKey(v);
+      o.textContent = (v.name || '未命名') + (v.localService ? ' · 本地' : ' · 网络');
+      narrVoiceSel.appendChild(o);
+    });
+    const exists = voiceKey && Array.from(narrVoiceSel.options).some((o) => o.value === voiceKey);
+    narrVoiceSel.value = exists ? voiceKey : '';
   }
 
   function refreshVoices() {
     if (!synth) {
       noZhVoice = true;
+      zhVoices = [];
+      renderVoiceList();
       updateNarrControls();
       return;
     }
     const vs = synth.getVoices();
-    if (!vs.length) return;
-    zhVoice = vs.find((v) => /^zh/i.test(v.lang || '')) || null;
+    if (!vs.length) return; // Chrome 首次可能为空，等 voiceschanged
+    zhVoices = vs.filter((v) => /^zh/i.test(v.lang || ''));
+    zhVoice = pickVoice(zhVoices, voiceKey);
     noZhVoice = !zhVoice;
+    renderVoiceList();
     updateNarrControls();
   }
 
@@ -229,6 +293,8 @@
       refreshVoices();
       if (!synth.getVoices().length) {
         noZhVoice = true;
+        zhVoices = [];
+        renderVoiceList();
         updateNarrControls();
       }
     }, 1800);
@@ -253,7 +319,9 @@
     }
   }
 
+  let narrToken = 0;
   function stopNarration() {
+    narrToken++;
     if (synth) synth.cancel();
     if (narrAudio) {
       try { narrAudio.pause(); narrAudio.currentTime = 0; } catch (e) { /* 忽略 */ }
@@ -282,39 +350,47 @@
     }
   }
 
-  function speakCurrent() {
-    const item = NARR_MAP[currentNarrId];
-    if (!item) return;
+  // 朗读单条；onVoiceEnd 在语音结束/失败时回调，供播放推进使用
+  function speakItem(id, onVoiceEnd) {
     stopNarration();
+    const token = narrToken;
+    const item = NARR_MAP[id];
+    if (!item) { if (onVoiceEnd) onVoiceEnd(); return; }
+    currentNarrId = id;
     markSpeaking(true);
+    const done = () => { if (token !== narrToken) return; if (onVoiceEnd) onVoiceEnd(); };
     if (item.audioSrc) {
       narrAudio = new Audio(item.audioSrc);
       narrAudio.volume = narrVolVal;
-      narrAudio.onended = () => markSpeaking(false);
-      narrAudio.onerror = () => { markSpeaking(false); };
-      narrAudio.play().catch(() => markSpeaking(false));
+      narrAudio.onended = () => { if (token !== narrToken) return; markSpeaking(false); done(); };
+      narrAudio.onerror = () => { if (token !== narrToken) return; markSpeaking(false); done(); };
+      narrAudio.play().catch(() => { if (token !== narrToken) return; markSpeaking(false); done(); });
       return;
     }
     if (!synth || noZhVoice) {
       markSpeaking(false);
-      updateNarrControls();
       return;
     }
     utter = new SpeechSynthesisUtterance(item.text);
     utter.lang = 'zh-CN';
     if (zhVoice) utter.voice = zhVoice;
-    utter.rate = narrRateVal;
+    utter.rate = effRate();
+    utter.pitch = TONE_PITCH;
     utter.volume = narrVolVal;
-    utter.onend = () => markSpeaking(false);
+    utter.onend = () => { if (token !== narrToken) return; markSpeaking(false); done(); };
     utter.onerror = (e) => {
+      if (token !== narrToken) return;
       markSpeaking(false);
       if (e && /language|voice/i.test(e.error || '')) {
         noZhVoice = true;
         updateNarrControls();
       }
+      done();
     };
     synth.speak(utter);
   }
+
+  function speakCurrent() { speakItem(currentNarrId); }
 
   // 自动播报：仅时间轴播放推进到新事件、或用户主动点选事件时调用
   function narrEvent(ev, force) {
@@ -340,7 +416,8 @@
       if (narrOn) speakCurrent();
       return;
     }
-    if (narrOn && !narrSpeaking) speakCurrent();
+    // 再次进入只同步文字，不自动重播已播段落
+    showNarr(currentNarrId);
   }
 
   function narrEnd() {
@@ -353,7 +430,7 @@
     store.set('cs_narr_on', narrOn ? '1' : '0');
     updateNarrControls();
     if (narrOn) speakCurrent();
-    else stopNarration();
+    else { stopNarration(); onNarrationOff(); }
   });
 
   narrCollapse.addEventListener('click', () => {
@@ -364,19 +441,64 @@
   });
 
   narrSpeakBtn.addEventListener('click', () => speakCurrent());
-  narrStopBtn.addEventListener('click', () => stopNarration());
+  narrStopBtn.addEventListener('click', () => {
+    if (DAY0STATE.playing) pausePlayback();
+    else stopNarration();
+  });
 
+  narrPace.value = paceKey;
   narrRate.value = String(narrRateVal);
   narrVol.value = String(narrVolVal);
+  narrPace.addEventListener('change', () => {
+    paceKey = PACES[narrPace.value] ? narrPace.value : 'normal';
+    store.set('cs_narr_pace', paceKey);
+    retimeCurrentBeat();
+  });
   narrRate.addEventListener('change', () => {
     narrRateVal = parseFloat(narrRate.value) || 1;
     store.set('cs_narr_rate', String(narrRateVal));
+    retimeCurrentBeat();
   });
   narrVol.addEventListener('input', () => {
     narrVolVal = parseFloat(narrVol.value);
     if (!isFinite(narrVolVal)) narrVolVal = 1;
     store.set('cs_narr_vol', String(narrVolVal));
   });
+
+  // 节奏/语速变化后按新参数重排当前节拍的时间（不打断正在朗读的这一条）
+  function retimeCurrentBeat() {
+    const ps = playState;
+    if (!ps || ps.finished) return;
+    ps.dwellMs = paceOf().dwell * 1000;
+    if (ps.phase === 'move') {
+      const p = clamp((performance.now() - ps.moveStart) / ps.moveMs, 0, 1);
+      const total = Math.max(4000, itemSeconds(ps.beat.narrs) * 0.95 * 1000);
+      ps.moveMs = total;
+      ps.moveStart = performance.now() - p * total;
+    }
+  }
+
+  // 切换声音：先取消旧语音，再用新声音重播当前条，不叠加
+  function reapplyNarrationTone() {
+    retimeCurrentBeat();
+    if (!narrSpeaking) return;
+    if (DAY0STATE.playing && playState && !playState.paused && !playState.speechDone) {
+      startBeatItem(playState.narrIdx);
+    } else {
+      speakCurrent();
+    }
+  }
+
+  if (narrVoiceSel) {
+    narrVoiceSel.addEventListener('change', () => {
+      voiceKey = narrVoiceSel.value;
+      store.set('cs_voice_key', voiceKey);
+      zhVoice = pickVoice(zhVoices, voiceKey);
+      noZhVoice = !zhVoice;
+      updateNarrControls();
+      reapplyNarrationTone();
+    });
+  }
 
   showNarr('open');
   updateNarrControls();
@@ -424,6 +546,8 @@
   }
 
   function jumpToEvent(e) {
+    if (DAY0STATE.playing) pausePlayback();
+    playState = null;
     setDay(e.day, true);
     showEventCard(e);
     highlightAt(e.lon, e.lat, true);
@@ -526,6 +650,7 @@
   function startDrag(e) {
     dragging = true;
     pausePlayback();
+    playState = null; // 手动定位后，播放从当前日期对应的节拍重新开始
     tlKnob.style.cursor = 'grabbing';
     setDay(dayFromPointer(e.clientX));
     e.preventDefault();
@@ -547,15 +672,192 @@
   tlTrack.addEventListener('lostpointercapture', endDrag);
 
   tlKnob.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowLeft') { pausePlayback(); setDay(DAY0STATE.day - 1); e.preventDefault(); }
-    if (e.key === 'ArrowRight') { pausePlayback(); setDay(DAY0STATE.day + 1); e.preventDefault(); }
+    if (e.key === 'ArrowLeft') { pausePlayback(); playState = null; setDay(DAY0STATE.day - 1); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { pausePlayback(); playState = null; setDay(DAY0STATE.day + 1); e.preventDefault(); }
   });
 
-  /* ---------------- 播放 ---------------- */
-  const SPEED = 2.4;
-  let dwell = 0;
+  /* ---------------- 播放：解说驱动推进 ----------------
+     每个节拍 = 一条或一组解说（章节总述 + 同一天的事件卡）。
+     画面在“该组解说估算时长 × 0.9”内走完这一段，随后等待语音真正 onend，
+     再按节奏档位停顿 1.2–1.8 秒，才进入下一节拍。 */
   let rafId = null;
-  let lastT = 0;
+  let playState = null;
+
+  const chapterForEvent = { e3: 'c1', e5: 'c2', e11: 'c3', e12: 'c4' };
+  const BEATS = (function buildBeats() {
+    const list = [];
+    function push(day, narrs, label, eventId) {
+      const last = list[list.length - 1];
+      if (last && Math.abs(last.day - day) < 0.001) {
+        last.narrs = last.narrs.concat(narrs);
+        if (label) last.label += ' / ' + label;
+        if (eventId) last.eventId = eventId;
+        return;
+      }
+      list.push({ day, narrs, label: label || '', eventId: eventId || null });
+    }
+    push(0, ['open'], '开篇');
+    events.forEach((ev) => {
+      const ch = chapterForEvent[ev.id];
+      push(ev.day, ch ? [ch, ev.id] : [ev.id], ev.title, ev.id);
+    });
+    push(DAYS, ['tail', 'close'], '尾声');
+    return list;
+  })();
+
+  const easeInOut = (p) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+
+  function beatForDay(day) {
+    // 从当前日期向后找最近的节拍，避免拖到中途后按播放出现大幅回跳
+    for (let i = 0; i < BEATS.length; i++) {
+      if (BEATS[i].day >= day - 0.001) return i;
+    }
+    return BEATS.length - 1;
+  }
+
+  function clearBeatTimers() {
+    if (!playState) return;
+    if (playState.itemTimer) clearTimeout(playState.itemTimer);
+    if (playState.guardTimer) clearTimeout(playState.guardTimer);
+    playState.itemTimer = null;
+    playState.guardTimer = null;
+  }
+
+  function itemSeconds(ids) {
+    return ids.reduce((s, id) => s + estSec(id), 0);
+  }
+
+  function beginBeat(i) {
+    clearBeatTimers();
+    stopNarration();
+    const beat = BEATS[i];
+    const next = BEATS[i + 1];
+    const endDay = next ? next.day : DAYS;
+    const estTotal = itemSeconds(beat.narrs);
+    const moveMs = endDay > beat.day ? Math.max(4000, estTotal * 0.86 * 1000) : 1;
+    playState = {
+      i,
+      beat,
+      paused: false,
+      finished: false,
+      startDay: beat.day,
+      endDay,
+      moveMs,
+      moveStart: performance.now(),
+      moveElapsed: 0,
+      phase: endDay > beat.day ? 'move' : 'hold',
+      narrIdx: 0,
+      speechDone: false,
+      itemStart: 0,
+      itemMs: 0,
+      minElapsed: false,
+      voiceDone: false,
+      itemTimer: null,
+      guardTimer: null,
+      dwellStart: 0,
+      dwellMs: paceOf().dwell * 1000
+    };
+    setDay(beat.day);
+    if (beat.eventId) setActiveChip(beat.eventId);
+    startBeatItem(0);
+  }
+
+  function startBeatItem(k) {
+    const ps = playState;
+    if (!ps) return;
+    clearBeatTimers();
+    ps.narrIdx = k;
+    if (k >= ps.beat.narrs.length) {
+      ps.speechDone = true;
+      return;
+    }
+    const id = ps.beat.narrs[k];
+    showNarr(id);
+    const shouldSpeak = narrOn && !noZhVoice && NARR_MAP[id];
+    const ms = estSec(id) * 1000;
+    // 有语音时以 onend 为准，这里只保留 8 秒下限，避免“闪一下就过”
+    const minMs = shouldSpeak ? Math.min(8000, ms) : ms;
+    ps.itemStart = performance.now();
+    ps.itemMs = ms;
+    ps.minElapsed = false;
+    ps.voiceDone = false;
+    ps.itemTimer = setTimeout(() => {
+      if (playState !== ps) return;
+      ps.minElapsed = true;
+      checkBeatItem();
+    }, minMs);
+    if (shouldSpeak) {
+      // onend 不触发时的兜底：估算时长 + 7 秒后强制放行
+      ps.guardTimer = setTimeout(() => {
+        if (playState !== ps) return;
+        ps.voiceDone = true;
+        stopNarration();
+        checkBeatItem();
+      }, ms + 7000);
+      speakItem(id, () => {
+        if (playState !== ps) return;
+        ps.voiceDone = true;
+        checkBeatItem();
+      });
+    } else {
+      ps.voiceDone = true; // 解说关闭 / 无中文语音：只用估算时长
+    }
+  }
+
+  function checkBeatItem() {
+    const ps = playState;
+    if (!ps || ps.paused || ps.finished) return;
+    if (!ps.minElapsed || !ps.voiceDone) return;
+    clearBeatTimers();
+    if (ps.narrIdx + 1 < ps.beat.narrs.length) {
+      const n = ps.narrIdx + 1;
+      setTimeout(() => { if (playState === ps) startBeatItem(n); }, 350);
+    } else {
+      ps.speechDone = true;
+    }
+  }
+
+  // 解说被手动关闭时，让当前节拍剩 remainder 的估算时长走完，不抢段
+  function onNarrationOff() {
+    const ps = playState;
+    if (!ps || ps.paused || ps.finished || ps.speechDone) return;
+    ps.voiceDone = true;
+    checkBeatItem();
+  }
+
+  function finishPlayback() {
+    const ps = playState;
+    if (ps) {
+      ps.finished = true;
+      ps.paused = false;
+      ps.dwellStart = 0;
+    }
+    DAY0STATE.playing = false;
+    playBtn.textContent = '播放';
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    setDay(DAYS);
+  }
+
+  function playTick(t) {
+    if (!DAY0STATE.playing || !playState) return;
+    const ps = playState;
+    if (ps.phase === 'move') {
+      const p = clamp((t - ps.moveStart) / ps.moveMs, 0, 1);
+      setDay(ps.startDay + (ps.endDay - ps.startDay) * easeInOut(p));
+      if (p >= 1) { ps.phase = 'hold'; ps.dwellStart = 0; }
+    } else if (ps.phase === 'hold' && ps.speechDone) {
+      if (!ps.dwellStart) ps.dwellStart = performance.now();
+      if (performance.now() - ps.dwellStart >= ps.dwellMs) {
+        const next = ps.i + 1;
+        if (next >= BEATS.length) { finishPlayback(); return; }
+        beginBeat(next);
+        rafId = requestAnimationFrame(playTick);
+        return;
+      }
+    }
+    rafId = requestAnimationFrame(playTick);
+  }
 
   function playPause() {
     if (DAY0STATE.playing) pausePlayback();
@@ -563,13 +865,19 @@
   }
 
   function startPlayback() {
-    if (DAY0STATE.day >= DAYS) setDay(0);
+    if (playState && playState.paused && !playState.finished) {
+      const ps = playState;
+      ps.paused = false;
+      ps.moveStart = performance.now() - ps.moveElapsed;
+      if (ps.speechDone) ps.dwellStart = performance.now();
+      else startBeatItem(ps.narrIdx);
+    } else {
+      const idx = (DAY0STATE.day >= DAYS) ? 0 : beatForDay(DAY0STATE.day);
+      beginBeat(idx);
+    }
     DAY0STATE.playing = true;
     playBtn.textContent = '暂停';
-    lastT = performance.now();
-    dwell = 0;
-    narrEvent(currentEvent(DAY0STATE.day), true);
-    loop(performance.now());
+    rafId = requestAnimationFrame(playTick);
   }
 
   function pausePlayback() {
@@ -577,38 +885,17 @@
     playBtn.textContent = '播放';
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
-    stopNarration();
-  }
-
-  function loop(t) {
-    if (!DAY0STATE.playing) return;
-    const dt = Math.min(0.2, (t - lastT) / 1000);
-    lastT = t;
-    if (dwell > 0) {
-      dwell -= dt;
-    } else {
-      let nd = DAY0STATE.day + dt * SPEED;
-      const next = events.find((e) => e.day > DAY0STATE.day + 0.001 && e.day <= nd);
-      if (next) {
-        nd = next.day;
-        dwell = 1.35;
-        setActiveChip(next.id);
-        narrEvent(next);
-      }
-      if (nd >= DAYS) {
-        nd = DAYS;
-        setDay(nd);
-        pausePlayback();
-        narrEnd();
-        return;
-      }
-      setDay(nd);
+    if (playState && !playState.finished) {
+      playState.paused = true;
+      playState.moveElapsed = performance.now() - playState.moveStart;
     }
-    rafId = requestAnimationFrame(loop);
+    clearBeatTimers();
+    stopNarration();
   }
 
   playBtn.addEventListener('click', playPause);
   $('#replayBtn').addEventListener('click', () => {
+    playState = null;
     setDay(0);
     startPlayback();
   });

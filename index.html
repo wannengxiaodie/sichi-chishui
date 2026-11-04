@@ -120,6 +120,13 @@
         <div class="narr-controls">
           <button class="narr-btn" id="narrSpeak" type="button">朗读</button>
           <button class="narr-btn ghost" id="narrStop" type="button">停止</button>
+          <label class="narr-field">节奏
+            <select id="narrPace">
+              <option value="calm">舒缓</option>
+              <option value="normal" selected>标准</option>
+              <option value="tight">紧凑</option>
+            </select>
+          </label>
           <label class="narr-field">语速
             <select id="narrRate">
               <option value="0.8">0.8</option>
@@ -128,6 +135,14 @@
             </select>
           </label>
           <label class="narr-field">音量<input type="range" id="narrVol" min="0" max="1" step="0.1" value="1"></label>
+        </div>
+        <div class="narr-voices">
+          <label class="narr-field narr-voice-field">朗读声音
+            <select id="narrVoice" aria-describedby="narrVoiceHelp">
+              <option value="">自动选择</option>
+            </select>
+          </label>
+          <p class="narr-help" id="narrVoiceHelp">macOS：系统设置 → 辅助功能 → 朗读内容 → 系统声音 → 管理声音，下载中文语音；Windows：设置 → 时间和语言 → 语音，添加中文语音。</p>
         </div>
       </div>
     </aside>
