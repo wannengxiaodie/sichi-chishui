@@ -211,6 +211,8 @@
   }
 
   let narrOn = store.get('cs_narr_on', '1') !== '0';
+  // 旧版声音选择记忆已废弃，顺手清掉，避免残留
+  try { localStorage.removeItem('cs_voice_key'); } catch (e) { /* 隐私模式忽略 */ }
   let narrRateVal = parseFloat(store.get('cs_narr_rate', '1')) || 1;
   let narrVolVal = parseFloat(store.get('cs_narr_vol', '1'));
   if (!isFinite(narrVolVal)) narrVolVal = 1;
