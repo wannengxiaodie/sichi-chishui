@@ -1259,6 +1259,13 @@ body {
   transition: opacity .25s;
 }
 
+.sch-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  pointer-events: stroke;
+}
+
 .sch-route .sch-halo,
 .sch-route .sch-line {
   fill: none;
@@ -1269,13 +1276,13 @@ body {
 
 .sch-route .sch-halo {
   stroke: #7a2118;
-  stroke-width: 7;
+  stroke-width: 7.5;
   opacity: .42;
 }
 
 .sch-route .sch-line {
   stroke: #b23a2c;
-  stroke-width: 3;
+  stroke-width: 3.2;
 }
 
 .sch-route .sch-dot {
