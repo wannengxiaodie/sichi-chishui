@@ -1051,9 +1051,11 @@
     scene.add(enemyGroup);
   }
 
-  /* ---------------- 红色立体箭头 ---------------- */
-  const ARROW_HALF = 0.3;
-  const ARROW_THICK = 0.3;
+  /* ---------------- 红色立体箭头 ----------------
+     形制参照手绘毛笔箭头：尾端细、向箭镞渐宽，箭镞为宽扁后掠翼、内凹缺口，
+     边缘带细微不均匀抖动。整条箭头仍在同一基准平面内。 */
+  const ARROW_HALF = 0.36;
+  const ARROW_THICK = 0.28;
   let arrowBaseY = 0;
 
   // 统一基准平面：取全部四渡路线样点（含约 ±1.3 km 邻域）的最高地形，再抬升固定值。
@@ -1100,12 +1102,17 @@
       const next = pts[Math.min(i + 1, segs)];
       const tan = new THREE.Vector3(next.x - prev.x, 0, next.z - prev.z).normalize();
       const side = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-      const a = ARROW_HALF * (1 - (i / segs) * 0.3);
+      const t = i / segs;
+      // 宽度曲线：尾端约 0.40 倍，向箭镞逐渐展宽到 1.0 倍，模拟笔锋
+      const base = ARROW_HALF * (0.40 + 0.60 * Math.pow(t, 0.72));
+      // 两侧各带 ±5% 的低频起伏，形成手绘毛边的轻微不齐（频率过高会变成锯齿）
+      const aL = base * (1 + (Math.sin(i * 0.33 + 0.6) * 0.6 + Math.sin(i * 0.11 + 2.1) * 0.4) * 0.05);
+      const aR = base * (1 + (Math.sin(i * 0.41 + 1.9) * 0.6 + Math.sin(i * 0.14 + 0.7) * 0.4) * 0.05);
       const corners = [
-        [p.x + side.x * a, p.y + ARROW_THICK, p.z + side.z * a],
-        [p.x - side.x * a, p.y + ARROW_THICK, p.z - side.z * a],
-        [p.x - side.x * a, p.y - ARROW_THICK * 0.2, p.z - side.z * a],
-        [p.x + side.x * a, p.y - ARROW_THICK * 0.2, p.z + side.z * a]
+        [p.x + side.x * aL, p.y + ARROW_THICK, p.z + side.z * aL],
+        [p.x - side.x * aR, p.y + ARROW_THICK, p.z - side.z * aR],
+        [p.x - side.x * aR, p.y - ARROW_THICK * 0.2, p.z - side.z * aR],
+        [p.x + side.x * aL, p.y - ARROW_THICK * 0.2, p.z + side.z * aL]
       ];
       corners.forEach((c) => pos.push(c[0], c[1], c[2]));
     }
@@ -1125,15 +1132,18 @@
     return g;
   }
 
+  // 宽扁后掠箭镞：长 1.46、展宽 2.0（约为箭身宽的 2.8 倍），
+  // 翼尖后掠、基部中央内凹成缺口，箭身由缺口处接入，避免"色带 + 三角"的生硬感。
   function buildArrowHeadGeo() {
     const sh = new THREE.Shape();
-    sh.moveTo(-0.95, 1.2);
-    sh.lineTo(0.95, 1.2);
-    sh.lineTo(0, -1.95);
+    sh.moveTo(0, -1.0);     // 镞尖（局部 +z 方向）
+    sh.lineTo(-1.0, 0.46);  // 上翼尖（后掠）
+    sh.lineTo(0, 0.12);     // 中央内凹缺口
+    sh.lineTo(1.0, 0.46);   // 下翼尖
     sh.closePath();
-    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.42, bevelEnabled: false });
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.38, bevelEnabled: false });
     g.rotateX(-Math.PI / 2);
-    g.translate(0, ARROW_THICK * 0.2, 0);
+    g.translate(0, -0.02, 0);
     g.computeVertexNormals();
     return g;
   }
