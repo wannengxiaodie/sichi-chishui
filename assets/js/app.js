@@ -1462,7 +1462,7 @@
     const idx = [];
     const segs = pts.length - 1;
     const yOff = ARROW_THICK * 0.5 * 0.06;
-    const inner = 1.0, outer = 1.16;
+    const inner = 1.0, outer = 1.09;
     const tan = new THREE.Vector3();
     const side = new THREE.Vector3();
     for (let i = 0; i <= segs; i++) {
@@ -1673,10 +1673,10 @@
         shadow.renderOrder = 9;
         arrowGroup.add(shadow);
 
-        // 描边窄带：箭身之下，只沿两侧刃口露出
+        // 描边窄带：压在箭身之上、箭镞之下，避免透过半透明箭身显出深色条带
         const rim = new THREE.Mesh(rimGeo, rimMat);
         rim.visible = false;
-        rim.renderOrder = baseOrder - 1;
+        rim.renderOrder = baseOrder + 0.5;
         arrowGroup.add(rim);
 
         const shaft = new THREE.Mesh(shaftGeo, mat);
@@ -1691,6 +1691,7 @@
 
         stage._pts = s.pts;
         stage._segs = s.pts.length - 1;
+        stage._len = s.length;
         stage._cap = shaftGeo.userData.cap;
         stage._idxPerSeg = shaftGeo.userData.idxPerSeg;
         stage._shaft = shaft;
@@ -1709,7 +1710,7 @@
       });
     });
     scene.add(arrowGroup);
-    if (window.__CS_DEBUG) window.__csArrow = { mats, rimMat, shadowMat };
+    if (window.__CS_DEBUG) { window.__csArrow = { mats, rimMat, shadowMat }; window.__csArrowGroup = arrowGroup; }
   }
 
   /* ---------------- 高亮环 ---------------- */
@@ -1900,7 +1901,9 @@
         const grown = Math.max(1, Math.floor(segs * p));
         const shaftLen = stage._cap + grown * stage._idxPerSeg;
         stage._shaft.geometry.setDrawRange(0, shaftLen);
-        stage._rim.geometry.setDrawRange(0, grown * stage._rimPerSeg);
+        // 描边窄带不进入箭镞覆盖区，避免在镞体下透出深色折线
+        const trim = Math.ceil(((HEAD_OVERLAP + 0.18) / (stage._len || 1)) * segs);
+        stage._rim.geometry.setDrawRange(0, Math.max(0, grown - trim) * stage._rimPerSeg);
         const shadowSegs = stage._shadow.geometry.userData.segs;
         stage._shadow.geometry.setDrawRange(0,
           Math.max(1, Math.floor(shadowSegs * p)) * stage._shadowPerSeg);
