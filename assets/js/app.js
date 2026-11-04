@@ -211,8 +211,6 @@
   }
 
   let narrOn = store.get('cs_narr_on', '1') !== '0';
-  // 旧版声音选择记忆已废弃，顺手清掉，避免残留
-  try { localStorage.removeItem('cs_voice_key'); } catch (e) { /* 隐私模式忽略 */ }
   let narrRateVal = parseFloat(store.get('cs_narr_rate', '1')) || 1;
   let narrVolVal = parseFloat(store.get('cs_narr_vol', '1'));
   if (!isFinite(narrVolVal)) narrVolVal = 1;
@@ -462,8 +460,13 @@
     }
 
     routes.forEach((g) => {
-      g.addEventListener('pointerenter', () => focusRoute(g.dataset.cross));
-      g.addEventListener('pointerleave', () => focusRoute(null));
+      // 用 pointerover/out（可冒泡）而非 enter/leave，SVG 分组在各浏览器上更稳
+      g.addEventListener('pointerover', (e) => {
+        if (!g.contains(e.relatedTarget)) focusRoute(g.dataset.cross);
+      });
+      g.addEventListener('pointerout', (e) => {
+        if (!g.contains(e.relatedTarget)) focusRoute(null);
+      });
       g.addEventListener('focus', () => focusRoute(g.dataset.cross));
       g.addEventListener('blur', () => focusRoute(null));
 
@@ -965,11 +968,11 @@
     }
     if (!renderer || !renderer.getContext()) return false;
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.8));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.02;
+    renderer.toneMappingExposure = 1.05;
 
     scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x1b2822, 0.0042);
@@ -1002,6 +1005,31 @@
     buildHighlight();
     buildLabels();
     bindControls();
+
+    if (window.__CS_DEBUG) {
+      // 仅供自动化走查取景，生产环境不暴露
+      window.__csView = () => ({
+        target: camTarget.toArray(),
+        radius: camRadius,
+        theta: camTheta,
+        phi: camPhi,
+        mode: DAY0STATE.mode
+      });
+      window.__csFocus = function (no, si, f, radius, theta, phi) {
+        const c = crossings.find((x) => x.no === no);
+        const s = c && c.stages[si];
+        if (!s || !s._pts) return null;
+        const idx = clamp(Math.round((s._pts.length - 1) * f), 0, s._pts.length - 1);
+        const pt = s._pts[idx];
+        DAY0STATE.mode = 'free';
+        goalTarget.set(pt.x, pt.y, pt.z);
+        camTarget.copy(goalTarget);
+        goalRadius = camRadius = radius || 8;
+        if (theta != null) { goalTheta = camTheta = theta; }
+        if (phi != null) { goalPhi = camPhi = phi; }
+        return { x: pt.x, y: pt.y, z: pt.z, segs: s._segs };
+      };
+    }
 
     threeReady = true;
     return true;
@@ -1283,11 +1311,56 @@
   }
 
   /* ---------------- 红色立体箭头 ----------------
-     形制参照手绘毛笔箭头：尾端细、向箭镞渐宽，箭镞为宽扁后掠翼、内凹缺口，
-     边缘带细微不均匀抖动。整条箭头仍在同一基准平面内。 */
-  const ARROW_HALF = 0.36;
-  const ARROW_THICK = 0.28;
+     形制参照手绘毛笔箭头：尾部收窄、中段最宽，截面为圆角刃口；箭镞为宽扁后掠翼、
+     中央内凹缺口、边缘倒角。整条箭头仍在同一基准平面内，沿弧长自适应细分。 */
+  const ARROW_HALF = 0.42;      // 中段标准半宽
+  const ARROW_THICK = 0.30;     // 中轴总厚度
+  const HEAD_LEN = 1.66;        // 箭镞长度（沿行进方向）
+  const HEAD_SPAN = 2.12;       // 箭镞展宽
+  const HEAD_OVERLAP = 0.55;    // 箭身伸入箭镞的重叠量
+  const RING = 12;              // 圆角刃口截面顶点数
   let arrowBaseY = 0;
+
+  // 宽度曲线：尾端 0.55 → 中段 1.0 → 近镞 0.94 → 交接 0.76
+  // 单调三次样条（Fritsch–Carlson），保证不出现过冲与折线拐点
+  const AW = (function makeWidthCurve(keys) {
+    const n = keys.length;
+    const d = new Array(n);
+    d[0] = (keys[1][1] - keys[0][1]) / (keys[1][0] - keys[0][0]);
+    d[n - 1] = (keys[n - 1][1] - keys[n - 2][1]) / (keys[n - 1][0] - keys[n - 2][0]);
+    for (let i = 1; i < n - 1; i++) {
+      d[i] = (keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]);
+    }
+    for (let i = 0; i < n - 1; i++) {
+      const del = (keys[i + 1][1] - keys[i][1]) / (keys[i + 1][0] - keys[i][0]);
+      if (Math.abs(del) < 1e-9) { d[i] = 0; d[i + 1] = 0; continue; }
+      const a = d[i] / del, b = d[i + 1] / del;
+      if (a * a + b * b > 9) {
+        const s = 3 / Math.sqrt(a * a + b * b);
+        d[i] = s * a * del;
+        d[i + 1] = s * b * del;
+      }
+    }
+    return function widthAt(t) {
+      const x = clamp(t, 0, 1);
+      let i = 0;
+      while (i < n - 2 && x > keys[i + 1][0]) i++;
+      const h = keys[i + 1][0] - keys[i][0];
+      const u = (x - keys[i][0]) / h;
+      const u2 = u * u, u3 = u2 * u;
+      return (2 * u3 - 3 * u2 + 1) * keys[i][1] +
+        (u3 - 2 * u2 + u) * h * d[i] +
+        (-2 * u3 + 3 * u2) * keys[i + 1][1] +
+        (u3 - u2) * h * d[i + 1];
+    };
+  })([[0, 0.55], [0.42, 1.0], [0.78, 0.94], [1, 0.76]]);
+
+  // 截面：中部略厚、两侧收薄成刃口的圆角轮廓（上厚下略薄）
+  const RING_PROFILE = [
+    [0, 1.0], [0.58, 0.93], [0.90, 0.60], [1.0, 0.05],
+    [0.90, -0.55], [0.58, -0.80], [0, -0.92],
+    [-0.58, -0.80], [-0.90, -0.55], [-1.0, 0.05], [-0.90, 0.60], [-0.58, 0.93]
+  ];
 
   // 统一基准平面：取全部四渡路线样点（含约 ±1.3 km 邻域）的最高地形，再抬升固定值。
   // 箭头只在水平面内转向，不再逐点贴合 DEM，避免上下颠簸。
@@ -1318,76 +1391,232 @@
         '#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n' +
         'float csRim = pow(clamp(length(cross(normalize(normal), normalize(vViewPosition))), 0.0, 1.0), 2.4);\n' +
-        'totalEmissiveRadiance += vec3(0.95, 0.50, 0.36) * csRim * 0.28;'
+        'totalEmissiveRadiance += vec3(0.95, 0.50, 0.36) * csRim * 0.42;'
       );
     };
   }
 
-  function buildArrowShaft(pts) {
+  // 箭身：12 点圆角刃口截面沿路径放样，索引化后自动得到平滑法线
+  function buildArrowShaft(pts, ts) {
     const pos = [];
     const idx = [];
     const segs = pts.length - 1;
+    const halfTop = ARROW_THICK * 0.5;
+    const halfBot = ARROW_THICK * 0.42;
+    const tan = new THREE.Vector3();
+    const side = new THREE.Vector3();
+
     for (let i = 0; i <= segs; i++) {
       const p = pts[i];
       const prev = pts[Math.max(i - 1, 0)];
       const next = pts[Math.min(i + 1, segs)];
-      const tan = new THREE.Vector3(next.x - prev.x, 0, next.z - prev.z).normalize();
-      const side = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-      const t = i / segs;
-      // 宽度曲线：尾端约 0.40 倍，向箭镞逐渐展宽到 1.0 倍，模拟笔锋
-      const base = ARROW_HALF * (0.40 + 0.60 * Math.pow(t, 0.72));
-      // 两侧各带 ±5% 的低频起伏，形成手绘毛边的轻微不齐（频率过高会变成锯齿）
-      const aL = base * (1 + (Math.sin(i * 0.33 + 0.6) * 0.6 + Math.sin(i * 0.11 + 2.1) * 0.4) * 0.05);
-      const aR = base * (1 + (Math.sin(i * 0.41 + 1.9) * 0.6 + Math.sin(i * 0.14 + 0.7) * 0.4) * 0.05);
-      const corners = [
-        [p.x + side.x * aL, p.y + ARROW_THICK, p.z + side.z * aL],
-        [p.x - side.x * aR, p.y + ARROW_THICK, p.z - side.z * aR],
-        [p.x - side.x * aR, p.y - ARROW_THICK * 0.2, p.z - side.z * aR],
-        [p.x + side.x * aL, p.y - ARROW_THICK * 0.2, p.z + side.z * aL]
-      ];
-      corners.forEach((c) => pos.push(c[0], c[1], c[2]));
+      tan.set(next.x - prev.x, 0, next.z - prev.z);
+      if (tan.lengthSq() < 1e-10) tan.set(0, 0, 1);
+      tan.normalize();
+      side.set(-tan.z, 0, tan.x);
+      const w = ARROW_HALF * AW(ts[i]);
+      // 刃口截面：u 为横向、v 为纵向，两侧收薄到接近零厚度
+      for (let j = 0; j < RING; j++) {
+        const pr = RING_PROFILE[j];
+        const vh = pr[1] >= 0 ? halfTop : halfBot;
+        pos.push(p.x + side.x * pr[0] * w, p.y + pr[1] * vh, p.z + side.z * pr[0] * w);
+      }
+    }
+
+    // 尾端封口（三角扇），避免斜视角看到空心断面
+    const cIdx = pos.length / 3;
+    pos.push(pts[0].x, pts[0].y, pts[0].z);
+    for (let j = 0; j < RING; j++) idx.push(cIdx, j, (j + 1) % RING);
+
+    for (let i = 0; i < segs; i++) {
+      const a = i * RING, b = (i + 1) * RING;
+      for (let j = 0; j < RING; j++) {
+        const j2 = (j + 1) % RING;
+        idx.push(a + j, b + j, a + j2, a + j2, b + j, b + j2);
+      }
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    // 校验外法线朝向，必要时整体翻转绕向（防止光照反向）
+    if (g.attributes.normal.getY(0) < 0) {
+      const arr = g.index.array;
+      for (let i = 0; i < arr.length; i += 3) {
+        const tmp = arr[i + 1];
+        arr[i + 1] = arr[i + 2];
+        arr[i + 2] = tmp;
+      }
+      g.index.needsUpdate = true;
+      g.computeVertexNormals();
+    }
+    g.userData = { segs, cap: RING * 3, idxPerSeg: RING * 6 };
+    return g;
+  }
+
+  // 描边：沿截面两侧刃口生成两条暗红窄带，贴在最外侧而不覆盖箭身表面。
+  // （不用 BackSide 外扩外壳：半透明箭身会把整层外壳透出来，形成暗色横带）
+  function buildArrowRim(pts, ts) {
+    const pos = [];
+    const idx = [];
+    const segs = pts.length - 1;
+    const yOff = ARROW_THICK * 0.5 * 0.06;
+    const inner = 1.0, outer = 1.16;
+    const tan = new THREE.Vector3();
+    const side = new THREE.Vector3();
+    for (let i = 0; i <= segs; i++) {
+      const p = pts[i];
+      const prev = pts[Math.max(i - 1, 0)];
+      const next = pts[Math.min(i + 1, segs)];
+      tan.set(next.x - prev.x, 0, next.z - prev.z);
+      if (tan.lengthSq() < 1e-10) tan.set(0, 0, 1);
+      tan.normalize();
+      side.set(-tan.z, 0, tan.x);
+      const w = ARROW_HALF * AW(ts[i]);
+      [-1, 1].forEach((sgn) => {
+        pos.push(p.x + side.x * sgn * w * inner, p.y + yOff, p.z + side.z * sgn * w * inner);
+        pos.push(p.x + side.x * sgn * w * outer, p.y + yOff, p.z + side.z * sgn * w * outer);
+      });
     }
     for (let i = 0; i < segs; i++) {
       const a = i * 4, b = a + 4;
-      // 上、右、下、左 四个面
       idx.push(a, b, a + 1, a + 1, b, b + 1);
-      idx.push(a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
       idx.push(a + 2, b + 2, a + 3, a + 3, b + 2, b + 3);
-      idx.push(a + 3, b + 3, a, a, b + 3, b);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    g.userData = { segs };
+    g.userData = { idxPerSeg: 12, segs };
     return g;
   }
 
-  // 宽扁后掠箭镞：长 1.46、展宽 2.0（约为箭身宽的 2.8 倍），
-  // 翼尖后掠、基部中央内凹成缺口，箭身由缺口处接入，避免"色带 + 三角"的生硬感。
+  // 宽扁后掠箭镞：解析轮廓（上缘近直线 + 后掠翼 + 中央内凹缺口），
+  // Extrude 倒角沿边缘形成 1–2 圈内缩顶点，得到清晰的高光边。
   function buildArrowHeadGeo() {
+    const tipY = -HEAD_LEN * 0.64;
+    const wingY = HEAD_LEN * 0.36;
+    const halfSpan = HEAD_SPAN * 0.5;
     const sh = new THREE.Shape();
-    sh.moveTo(0, -1.0);     // 镞尖（局部 +z 方向）
-    sh.lineTo(-1.0, 0.46);  // 上翼尖（后掠）
-    sh.lineTo(0, 0.12);     // 中央内凹缺口
-    sh.lineTo(1.0, 0.46);   // 下翼尖
-    sh.closePath();
-    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.38, bevelEnabled: false });
+    sh.moveTo(0, tipY);
+    // 右翼外缘：近乎直线的轻微外扩
+    sh.quadraticCurveTo(halfSpan * 0.47, -0.28, halfSpan, wingY);
+    // 翼尖 → 中央缺口：向镞尖方向内凹
+    sh.quadraticCurveTo(halfSpan * 0.49, 0.02, 0, 0.10);
+    // 左半侧镜像
+    sh.quadraticCurveTo(-halfSpan * 0.49, 0.02, -halfSpan, wingY);
+    sh.quadraticCurveTo(-halfSpan * 0.47, -0.28, 0, tipY);
+
+    const g = new THREE.ExtrudeGeometry(sh, {
+      depth: 0.22, steps: 1, curveSegments: 18,
+      bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.06, bevelSegments: 2
+    });
     g.rotateX(-Math.PI / 2);
-    g.translate(0, -0.02, 0);
+    g.translate(0, -0.075, 0);
     g.computeVertexNormals();
     return g;
   }
 
-  function stagePoints(stage, samples) {
-    const v2 = stage.pts.map(([lon, lat]) => new THREE.Vector2(toX(lon), toZ(lat)));
-    const spline = new THREE.SplineCurve(v2);
+  // 沿弧长采样：间距 ≤0.095，并对弦高误差 >0.5% 路径长的区段继续细分
+  function sampleArrow(stage) {
+    const v3 = stage.pts.map(([lon, lat]) => new THREE.Vector3(toX(lon), arrowBaseY, toZ(lat)));
+    const curve = new THREE.CatmullRomCurve3(v3, false, 'centripetal', 0.5);
+    const L = curve.getLength();
+    const tol = Math.max(0.006, L * 0.005);
+    const base = Math.max(12, Math.ceil(L / 0.095));
     const out = [];
-    for (let i = 0; i <= samples; i++) {
-      const p = spline.getPoint(i / samples);
-      out.push(new THREE.Vector3(p.x, arrowBaseY, p.y));
+    const ab = new THREE.Vector3();
+    const ap = new THREE.Vector3();
+    const cr = new THREE.Vector3();
+
+    const sagitta = (p0, pm, p1) => {
+      ab.subVectors(p1, p0);
+      ap.subVectors(pm, p0);
+      if (ab.lengthSq() < 1e-10) return pm.distanceTo(p0);
+      cr.crossVectors(ab, ap);
+      return cr.length() / ab.length();
+    };
+
+    function emit(t0, p0, t1, p1, depth) {
+      const tm = (t0 + t1) * 0.5;
+      const pm = curve.getPoint(tm);
+      if (depth < 5 && sagitta(p0, pm, p1) > tol) {
+        emit(t0, p0, tm, pm, depth + 1);
+        out.push({ t: tm, p: pm });
+        emit(tm, pm, t1, p1, depth + 1);
+      }
     }
-    return out;
+
+    for (let i = 0; i < base; i++) {
+      const t0 = i / base, t1 = (i + 1) / base;
+      emit(t0, curve.getPoint(t0), t1, curve.getPoint(t1), 0);
+      out.push({ t: t1, p: curve.getPoint(t1) });
+    }
+
+    return { curve, pts: out.map((o) => o.p), ts: out.map((o) => o.t), length: L };
+  }
+
+  // 贴地阴影：沿路线贴合地形表面、随路宽变化的低透明度软边暗带
+  let arrowShadowTex = null;
+  function arrowShadowTexture() {
+    if (arrowShadowTex) return arrowShadowTex;
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 8;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(32, 4, 0, 32, 4, 32);
+    grad.addColorStop(0, 'rgba(0,0,0,.95)');
+    grad.addColorStop(0.55, 'rgba(0,0,0,.5)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 8);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    arrowShadowTex = tex;
+    return tex;
+  }
+
+  function buildArrowShadow(curve) {
+    const n = Math.max(20, Math.ceil(curve.getLength() / 0.3));
+    const across = [0, 0.5, 1];
+    const stride = across.length;
+    const pos = [];
+    const uv = [];
+    const idx = [];
+    const tan = new THREE.Vector3();
+    const side = new THREE.Vector3();
+
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const p = curve.getPoint(t);
+      tan.copy(curve.getTangent(t)).setY(0);
+      if (tan.lengthSq() < 1e-10) tan.set(0, 0, 1);
+      tan.normalize();
+      side.set(-tan.z, 0, tan.x);
+      const w = ARROW_HALF * AW(t) * 2.7;
+      for (let j = 0; j < stride; j++) {
+        const s = across[j] * 2 - 1;
+        const x = p.x + side.x * s * w;
+        const z = p.z + side.z * s * w;
+        pos.push(x, terrainY(lonAt(x), latAt(z)) + 0.06, z);
+        uv.push(across[j], 0.5);
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < stride - 1; j++) {
+        const a = i * stride + j, b = a + 1, c = a + stride, d = c + 1;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    g.userData = { segs: n, idxPerSeg: (stride - 1) * 6 };
+    return g;
   }
 
   const headGeo = buildArrowHeadGeo();
@@ -1395,33 +1624,61 @@
   function buildArrows() {
     arrowGroup = new THREE.Group();
     arrowBaseY = computeArrowBaseY();
+    // 描边窄带与贴地阴影全渡共用
+    const rimMat = new THREE.MeshBasicMaterial({
+      color: 0x5e1710, transparent: true, opacity: 0.5,
+      depthWrite: false, depthTest: false, side: THREE.DoubleSide
+    });
+    const shadowMat = new THREE.MeshBasicMaterial({
+      map: arrowShadowTexture(), color: 0x0a0f0b, transparent: true,
+      opacity: 0.18, depthWrite: false, side: THREE.DoubleSide
+    });
+    const mats = [];
+
     crossings.forEach((cross) => {
       // 每渡一份材质，箭身与箭头共用，保证透明度完全一致
       const mat = new THREE.MeshPhysicalMaterial({
         color: cross.color,
         transparent: true,
-        opacity: 0.64,
-        roughness: 0.72,
+        opacity: 0.72,
+        roughness: 0.55,
         metalness: 0,
-        transmission: 0.14,
-        thickness: 0.45,
-        ior: 1.36,
-        clearcoat: 0.1,
-        clearcoatRoughness: 0.75,
+        transmission: 0.2,
+        thickness: 0.55,
+        ior: 1.4,
+        clearcoat: 0.22,
+        clearcoatRoughness: 0.45,
+        specularIntensity: 0.5,
         emissive: 0x240706,
         emissiveIntensity: 0.2,
         depthWrite: false,
         depthTest: false,   // 统一基准面之上常显，避免被山脊半掩或在旋转变焦时闪烁
         side: THREE.DoubleSide,
-        flatShading: true
+        flatShading: false
       });
       tuneArrowMaterial(mat);
+      mats.push(mat);
 
       cross.stages.forEach((stage) => {
-        const pts = stagePoints(stage, 130);
-        const shaftGeo = buildArrowShaft(pts);
+        const s = sampleArrow(stage);
+        const shaftGeo = buildArrowShaft(s.pts, s.ts);
+        const rimGeo = buildArrowRim(s.pts, s.ts);
+        const shadowGeo = buildArrowShadow(s.curve);
 
         const baseOrder = 20 + (cross.no - 1) * 2;
+
+        // 贴地阴影：在地形之上、箭头之下
+        const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+        shadow.visible = false;
+        shadow.renderOrder = 9;
+        arrowGroup.add(shadow);
+
+        // 描边窄带：箭身之下，只沿两侧刃口露出
+        const rim = new THREE.Mesh(rimGeo, rimMat);
+        rim.visible = false;
+        rim.renderOrder = baseOrder - 1;
+        arrowGroup.add(rim);
+
         const shaft = new THREE.Mesh(shaftGeo, mat);
         shaft.visible = false;
         shaft.renderOrder = baseOrder;
@@ -1432,13 +1689,27 @@
         head.renderOrder = baseOrder + 1;
         arrowGroup.add(head);
 
-        stage._pts = pts;
+        stage._pts = s.pts;
+        stage._segs = s.pts.length - 1;
+        stage._cap = shaftGeo.userData.cap;
+        stage._idxPerSeg = shaftGeo.userData.idxPerSeg;
         stage._shaft = shaft;
+        stage._rim = rim;
         stage._head = head;
-        stage._segs = pts.length - 1;
+        stage._shadow = shadow;
+        stage._shadowPerSeg = shadowGeo.userData.idxPerSeg;
+        stage._rimPerSeg = rimGeo.userData.idxPerSeg;
+        const triCount = (g) => (g.index ? g.index.count : g.attributes.position.count) / 3;
+        stage._tris = {
+          shaft: triCount(shaftGeo),
+          rim: triCount(rimGeo),
+          shadow: triCount(shadowGeo),
+          head: triCount(headGeo)
+        };
       });
     });
     scene.add(arrowGroup);
+    if (window.__CS_DEBUG) window.__csArrow = { mats, rimMat, shadowMat };
   }
 
   /* ---------------- 高亮环 ---------------- */
@@ -1618,21 +1889,31 @@
         const p = clamp((day - stage.d0 + 0.45) / (stage.d1 - stage.d0), 0, 1);
         const active = day >= stage.d0;
         stage._shaft.visible = active && p > 0.01;
+        stage._rim.visible = stage._shaft.visible;
         stage._head.visible = active && p > 0.02;
+        stage._shadow.visible = active && p > 0.02;
         if (!stage._shaft.visible) {
           stage._head.visible = false;
           return;
         }
         const segs = stage._segs;
         const grown = Math.max(1, Math.floor(segs * p));
-        stage._shaft.geometry.setDrawRange(0, grown * 24);
+        const shaftLen = stage._cap + grown * stage._idxPerSeg;
+        stage._shaft.geometry.setDrawRange(0, shaftLen);
+        stage._rim.geometry.setDrawRange(0, grown * stage._rimPerSeg);
+        const shadowSegs = stage._shadow.geometry.userData.segs;
+        stage._shadow.geometry.setDrawRange(0,
+          Math.max(1, Math.floor(shadowSegs * p)) * stage._shadowPerSeg);
         const idx = clamp(Math.floor(segs * p), 0, segs);
         const pt = stage._pts[idx];
-        stage._head.position.set(pt.x, pt.y + 0.02, pt.z);
         const prev = stage._pts[Math.max(idx - 1, 0)];
         const tan = new THREE.Vector3(pt.x - prev.x, 0, pt.z - prev.z);
         if (tan.lengthSq() < 1e-6) tan.set(0, 0, 1);
         tan.normalize();
+        // 箭镞沿末端切线朝向，回退一段与箭身重叠，生长过程中不出现断裂
+        const hx = pt.x - tan.x * HEAD_OVERLAP;
+        const hz = pt.z - tan.z * HEAD_OVERLAP;
+        stage._head.position.set(hx, pt.y + 0.01, hz);
         stage._head.rotation.y = Math.atan2(tan.x, tan.z);
         if (p >= 0.999) currentHeads.push({ pos: pt, tan: tan, cross, end: true, d1: stage.d1 });
         else currentHeads.push({ pos: pt, tan: tan, cross, end: false, d1: stage.d1 });
@@ -1719,6 +2000,20 @@
 
     projectLabels();
     renderer.render(scene, camera);
+    if (window.__CS_DEBUG) {
+      window.__csStats = {
+        tris: renderer.info.render.triangles,
+        calls: renderer.info.render.calls,
+        stages: crossings.map((c) => ({
+          no: c.no,
+          segs: c.stages.map((s) => s._segs || 0),
+          tris: c.stages.reduce((a, s) => {
+            const t = s._tris || {};
+            return a + (t.shaft || 0) + (t.rim || 0) + (t.head || 0) + (t.shadow || 0);
+          }, 0)
+        }))
+      };
+    }
     void dt;
     void clock;
   }
