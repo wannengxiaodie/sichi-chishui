@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四渡赤水 · 1935 — 三个月，四次渡过同一条河</title>
+<meta name="description" content="1935 年 1—3 月中央红军四渡赤水专题：基于本地真实高程数据的三维沙盘、分段行军箭头、可拖动时间轴与事件卡。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230b0f0d'/%3E%3Cpath d='M12 44 L26 26 L36 38 L52 20' stroke='%23b23a2c' stroke-width='4' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ======================= 首屏 ======================= -->
+<header class="hero" id="top">
+  <div class="hero-bg" aria-hidden="true">
+    <div class="hero-glow"></div>
+    <svg class="hero-contours" viewBox="0 0 1440 900" preserveAspectRatio="none">
+      <g fill="none" stroke="#7f8f7a" stroke-opacity=".16">
+        <ellipse cx="250" cy="560" rx="150" ry="62"/><ellipse cx="250" cy="560" rx="228" ry="96"/><ellipse cx="250" cy="560" rx="308" ry="132"/>
+        <ellipse cx="1030" cy="300" rx="140" ry="58"/><ellipse cx="1030" cy="300" rx="214" ry="90"/><ellipse cx="1030" cy="300" rx="292" ry="124"/>
+        <ellipse cx="640" cy="760" rx="190" ry="78"/><ellipse cx="640" cy="760" rx="268" ry="110"/>
+      </g>
+      <path class="hero-river" d="M1180 120 C1080 260 1120 380 980 470 C860 548 780 610 700 720 C660 775 620 820 600 900" fill="none"/>
+    </svg>
+  </div>
+
+  <div class="hero-inner">
+    <p class="kicker"><span></span>CHISHUI · 1935<span></span></p>
+    <h1 class="hero-title">四渡赤水</h1>
+    <p class="hero-sub">三个月，四次渡过同一条河</p>
+    <p class="hero-lead">一九三五年一月十九日至三月三十一日<br>中央红军在川、滇、黔边界的往复穿插</p>
+
+    <div class="hero-meta">
+      <span><b>4<i>次</i></b><em>渡河</em></span>
+      <span><b>71<i>天</i></b><em>行程</em></span>
+      <span><b>3<i>省</i></b><em>川滇黔边区</em></span>
+    </div>
+
+    <a class="hero-enter" href="#sandbox">进入三维沙盘<i>↓</i></a>
+    <p class="hero-note">真实高程 DEM · 地名取自 OSM · 路线与战况为示意</p>
+  </div>
+  <div class="hero-vignette" aria-hidden="true"></div>
+</header>
+
+<main>
+
+<!-- ======================= 三维沙盘 ======================= -->
+<section class="stage" id="sandbox">
+  <div class="stage-frame">
+    <div class="stage-canvas-wrap">
+      <canvas id="scene"></canvas>
+      <div class="stage-fallback" id="fallback" hidden>
+        <canvas id="fallbackCanvas"></canvas>
+        <p class="fallback-note">当前浏览器未启用 WebGL，已切换为二维俯视示意图（红色箭头与时间轴仍可使用）。</p>
+      </div>
+      <div class="labels" id="labels" aria-hidden="true"></div>
+    </div>
+
+    <div class="stage-top">
+      <div class="stage-nav">
+        <button class="stage-exit" id="stageExit" type="button" title="返回总览（Esc）">
+          <i aria-hidden="true">←</i><span>返回总览</span><b>ESC</b>
+        </button>
+        <div class="stage-brand">
+          <span class="stage-kicker">THE FOUR CROSSINGS</span>
+          <span class="stage-line">四渡赤水 · 1935</span>
+        </div>
+      </div>
+      <div class="stage-date">
+        <b id="dateBig">1935.01.19</b>
+        <span id="phaseText">由遵义地区北上</span>
+      </div>
+      <div class="stage-tools">
+        <button class="tool" data-view="oblique">斜俯视</button>
+        <button class="tool" data-view="top">俯视全局</button>
+        <button class="tool" data-view="follow">跟随箭头</button>
+        <button class="tool" data-view="free">自由旋转</button>
+        <button class="tool toggle" id="enemyBtn" aria-pressed="false">敌军态势</button>
+      </div>
+    </div>
+
+    <div class="stage-stamp">
+      <span class="stamp-year" id="stampYear">1935</span>
+      <span class="stamp-month" id="stampMonth">一月</span>
+      <span class="stamp-scale">沙盘 · 东西约 220 公里</span>
+    </div>
+
+    <aside class="panel" id="panel" aria-live="polite">
+      <div class="panel-head">
+        <span id="panelKind">行军解读</span>
+        <button class="panel-close" id="panelClose" hidden aria-label="关闭">×</button>
+      </div>
+      <p class="panel-date" id="panelDate">1935.01.19</p>
+      <h3 class="panel-title" id="panelTitle">由遵义地区北上</h3>
+      <p class="panel-body" id="panelBody">遵义会议后，中央红军分路北上，向赤水、土城方向前进，计划在泸州、宜宾之间北渡长江。</p>
+      <dl class="panel-meta" id="panelMeta"></dl>
+      <p class="panel-note" id="panelNote"></p>
+    </aside>
+
+    <div class="legend" aria-label="图例">
+      <span><i class="sw sw-red"></i>红军行军</span>
+      <span><i class="sw sw-gold"></i>渡口</span>
+      <span><i class="sw sw-blue"></i>敌军态势</span>
+      <span><i class="sw sw-teal"></i>河流</span>
+    </div>
+
+    <aside class="narration" id="narration" aria-label="语音解说">
+      <div class="narr-head">
+        <span class="narr-kicker">旁白 <b>NARRATION</b></span>
+        <div class="narr-head-actions">
+          <button class="narr-switch" id="narrToggle" type="button" aria-pressed="true">解说 开</button>
+          <button class="narr-collapse" id="narrCollapse" type="button" aria-expanded="true" aria-controls="narrBody" title="折叠旁白">收起</button>
+        </div>
+      </div>
+      <div class="narr-body" id="narrBody">
+        <p class="narr-text" id="narrText"></p>
+        <p class="narr-close" id="narrClose" hidden></p>
+        <p class="narr-note" id="narrNote" hidden></p>
+        <div class="narr-controls">
+          <button class="narr-btn" id="narrSpeak" type="button">朗读</button>
+          <button class="narr-btn ghost" id="narrStop" type="button">停止</button>
+          <label class="narr-field">语速
+            <select id="narrRate">
+              <option value="0.8">0.8</option>
+              <option value="0.9">0.9</option>
+              <option value="1">1.0</option>
+            </select>
+          </label>
+          <label class="narr-field">音量<input type="range" id="narrVol" min="0" max="1" step="0.1" value="1"></label>
+        </div>
+      </div>
+    </aside>
+
+    <div class="stage-bottom">
+      <div class="timeline" id="timeline">
+        <div class="tl-months" aria-hidden="true">
+          <span style="left:0%">一月</span>
+          <span style="left:18.3%">二月</span>
+          <span style="left:57.7%">三月</span>
+        </div>
+        <div class="tl-track" id="tlTrack">
+          <div class="tl-ticks" id="tlTicks" aria-hidden="true"></div>
+          <div class="tl-fill" id="tlFill"></div>
+          <div class="tl-events" id="tlEvents"></div>
+          <div class="tl-knob" id="tlKnob" role="slider" tabindex="0" aria-label="时间轴" aria-valuemin="0" aria-valuemax="71" aria-valuenow="0"></div>
+        </div>
+        <div class="tl-labels" aria-hidden="true">
+          <span>01.19</span><span>02.01</span><span>02.15</span><span>03.01</span><span>03.15</span><span>03.31</span>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button class="transport-btn" id="playBtn" aria-label="播放">播放</button>
+        <button class="transport-btn ghost" id="replayBtn">重播</button>
+        <span class="transport-hint">拖动时间轴，或点击下方事件卡</span>
+      </div>
+
+      <div class="event-strip" id="eventStrip"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 四渡对照 ======================= -->
+<section class="compare" id="compare">
+  <div class="wrap">
+    <p class="kicker">FOUR CROSSINGS · COMPARISON</p>
+    <h2 class="sec-title">同一条河，四个方向</h2>
+    <p class="sec-sub">四次渡河不是重复，而是一次次把敌人的判断拉向错误的方向。</p>
+
+    <div class="compare-table" role="table" aria-label="四渡赤水对照">
+      <div class="compare-row head" role="row">
+        <span role="columnheader">次序</span>
+        <span role="columnheader">时间</span>
+        <span role="columnheader">渡口</span>
+        <span role="columnheader">方向</span>
+        <span role="columnheader">目的</span>
+        <span role="columnheader">结果</span>
+      </div>
+      <div class="compare-row" role="row">
+        <span class="c-no" data-label="次序"><i>一</i>一渡</span>
+        <span data-label="时间">1.29</span>
+        <span data-label="渡口">土城 · 元厚</span>
+        <span data-label="方向"><em class="dir w">西</em>川南</span>
+        <span data-label="目的">避战转向，另寻渡江战机</span>
+        <span data-label="结果">进入古蔺、叙永，北渡长江仍受阻</span>
+      </div>
+      <div class="compare-row" role="row">
+        <span class="c-no" data-label="次序"><i>二</i>二渡</span>
+        <span data-label="时间">2.18—21</span>
+        <span data-label="渡口">太平渡 · 二郎滩</span>
+        <span data-label="方向"><em class="dir e">东</em>黔北</span>
+        <span data-label="目的">回师黔北，趁虚再取遵义</span>
+        <span data-label="结果">娄山关、遵义战役，长征以来最大胜利</span>
+      </div>
+      <div class="compare-row" role="row">
+        <span class="c-no" data-label="次序"><i>三</i>三渡</span>
+        <span data-label="时间">3.16—17</span>
+        <span data-label="渡口">茅台</span>
+        <span data-label="方向"><em class="dir w">西</em>川南</span>
+        <span data-label="目的">示形于敌，诱使敌军主力西进</span>
+        <span data-label="结果">敌军西调，东返空隙出现</span>
+      </div>
+      <div class="compare-row" role="row">
+        <span class="c-no" data-label="次序"><i>四</i>四渡</span>
+        <span data-label="时间">3.21—22</span>
+        <span data-label="渡口">太平渡 · 二郎滩 · 九溪口</span>
+        <span data-label="方向"><em class="dir e">东</em>再南下</span>
+        <span data-label="目的">秘密东返，跳出合围</span>
+        <span data-label="结果">南渡乌江，兵锋贵阳，西进云南</span>
+      </div>
+    </div>
+
+    <div class="schematic">
+      <p class="sch-title">来回穿插 · 路线示意</p>
+      <svg class="sch-svg" viewBox="0 0 1000 280" role="img" aria-label="四渡赤水往返示意">
+        <defs>
+          <marker id="schArrow" viewBox="0 0 10 10" refX="9.4" refY="5" markerWidth="5.2" markerHeight="5.2" orient="auto">
+            <path d="M0.4 0.8 L10 5 L0.4 9.2 L3.5 5 Z" fill="#d4553f"/>
+          </marker>
+        </defs>
+        <line x1="500" y1="30" x2="500" y2="252" stroke="#c9a961" stroke-opacity=".4" stroke-width="1.6" stroke-dasharray="4 8"/>
+        <text x="500" y="20" text-anchor="middle" fill="#9c8d75" font-size="13" letter-spacing="3">赤 水 河</text>
+
+        <g class="sch-route" data-cross="c1" tabindex="0" role="button" aria-label="一渡赤水，1935年1月29日，西进川南">
+          <path id="schP1" class="sch-halo" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96"/>
+          <path class="sch-line" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96" marker-end="url(#schArrow)"/>
+          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
+            <animateMotion dur="9s" repeatCount="indefinite" rotate="auto"><mpath href="#schP1"/></animateMotion>
+          </circle>
+        </g>
+
+        <g class="sch-route" data-cross="c2" tabindex="0" role="button" aria-label="二渡赤水，1935年2月18日，东返黔北">
+          <path id="schP2" class="sch-halo" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136"/>
+          <path class="sch-line" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136" marker-end="url(#schArrow)"/>
+          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
+            <animateMotion dur="8s" repeatCount="indefinite" rotate="auto"><mpath href="#schP2"/></animateMotion>
+          </circle>
+        </g>
+
+        <g class="sch-route" data-cross="c3" tabindex="0" role="button" aria-label="三渡赤水，1935年3月16日，再进川南">
+          <path id="schP3" class="sch-halo" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182"/>
+          <path class="sch-line" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182" marker-end="url(#schArrow)"/>
+          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
+            <animateMotion dur="10s" repeatCount="indefinite" rotate="auto"><mpath href="#schP3"/></animateMotion>
+          </circle>
+        </g>
+
+        <g class="sch-route" data-cross="c4" tabindex="0" role="button" aria-label="四渡赤水，1935年3月21日，东返后南下乌江">
+          <path id="schP4" class="sch-halo" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222"/>
+          <path class="sch-line" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222" marker-end="url(#schArrow)"/>
+          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
+            <animateMotion dur="9s" repeatCount="indefinite" rotate="auto"><mpath href="#schP4"/></animateMotion>
+          </circle>
+        </g>
+
+        <g fill="#d9c4a1" font-size="13" letter-spacing="2" pointer-events="none">
+          <text x="300" y="44">一渡 · 1.29</text>
+          <text x="668" y="122">二渡 · 2.18</text>
+          <text x="330" y="158">三渡 · 3.16</text>
+          <text x="684" y="208">四渡 · 3.21</text>
+        </g>
+        <g fill="#9c8d75" font-size="11" letter-spacing="1.5" pointer-events="none">
+          <text x="292" y="110">西进川南</text>
+          <text x="700" y="168">东返黔北</text>
+          <text x="264" y="192">再进川南</text>
+          <text x="684" y="242">东返 · 南下乌江</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 尾章 ======================= -->
+<section class="epilogue" id="epilogue">
+  <div class="wrap">
+    <p class="kicker">AFTER · 1935.04 — 05</p>
+    <h2 class="sec-title">跳出包围之后</h2>
+    <p class="sec-sub">沙盘时间轴止于 3 月 31 日；四渡的战略收束发生在四月与五月。</p>
+
+    <div class="epi-grid">
+      <article class="epi-card">
+        <p class="epi-date">1935.04 初</p>
+        <h3>兵锋贵阳</h3>
+        <p>红军逼近贵阳，迫使蒋介石调滇军东援；红军乘虚西进云南。</p>
+        <p class="epi-note">“调出滇军”为常见叙述，具体调动过程待核。</p>
+      </article>
+      <article class="epi-card">
+        <p class="epi-date">1935.05</p>
+        <h3>巧渡金沙江</h3>
+        <p>红军在皎平渡等渡口渡过金沙江，摆脱数十万追敌，四渡赤水的战略意图至此收束。</p>
+        <p class="epi-note">皎平渡位于云南禄劝，在沙盘范围之外，故不在图中标注。</p>
+      </article>
+      <article class="epi-card quote">
+        <p class="epi-date">评说</p>
+        <h3>“得意之笔”</h3>
+        <p>四渡赤水常被称为毛泽东军事生涯中的“得意之笔”。此说流传广泛，但原始谈话出处与表述口径不一，<strong>待核</strong>，此处不作为史实引用。</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div class="foot-top">
+      <div>
+        <h4>数据来源与许可</h4>
+        <ul id="sourceList"></ul>
+      </div>
+      <div class="foot-meta">
+        <p><b>地形</b> 由本地高程瓦片重建，垂直方向有夸张；<b>河道</b> 由 DEM 谷底提取；<b>行军路线</b> 为示意走向。</p>
+        <p>本页为独立重制，非测绘成果，不作为地理测量依据。</p>
+        <p class="foot-credit">内容取材于公开史料；路线与地形为示意，不作为地理测量依据。</p>
+        <p class="foot-small">离线单页 · Three.js 本地引入 · 数据随项目交付</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/vendor/three.min.js"></script>
+<script src="assets/data/dem.js"></script>
+<script src="assets/data/river.js"></script>
+<script src="assets/data/story.js"></script>
+<script src="assets/data/narration.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
