@@ -1888,9 +1888,9 @@
       cross.stages.forEach((stage) => {
         const p = clamp((day - stage.d0 + 0.45) / (stage.d1 - stage.d0), 0, 1);
         const active = day >= stage.d0;
+        stage._p = p;
         stage._shaft.visible = active && p > 0.01;
         stage._rim.visible = stage._shaft.visible;
-        stage._head.visible = active && p > 0.02;
         stage._shadow.visible = active && p > 0.02;
         if (!stage._shaft.visible) {
           stage._head.visible = false;
@@ -1915,9 +1915,18 @@
         const hz = pt.z - tan.z * HEAD_OVERLAP;
         stage._head.position.set(hx, pt.y + 0.01, hz);
         stage._head.rotation.y = Math.atan2(tan.x, tan.z);
-        if (p >= 0.999) currentHeads.push({ pos: pt, tan: tan, cross, end: true, d1: stage.d1 });
-        else currentHeads.push({ pos: pt, tan: tan, cross, end: false, d1: stage.d1 });
+        stage._lead = { pos: pt, tan: tan, end: p >= 0.999, d1: stage.d1 };
       });
+      // 一条渡只保留最前端的一个箭镞，已走完的分段不再显示遗留箭头
+      let lead = null;
+      cross.stages.forEach((s) => {
+        if (s._p > 0.02 && s._shaft.visible) lead = s;
+        s._head.visible = false;
+      });
+      if (lead) {
+        lead._head.visible = true;
+        currentHeads.push({ pos: lead._lead.pos, tan: lead._lead.tan, cross, end: lead._lead.end, d1: lead._lead.d1 });
+      }
     });
 
     // 渡口高亮：仅在实际渡河日窗口内
