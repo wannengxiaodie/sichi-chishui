@@ -183,7 +183,6 @@
   const narrRate = $('#narrRate');
   const narrVol = $('#narrVol');
   const narrPace = $('#narrPace');
-  const narrVoiceSel = $('#narrVoice');
   const synth = window.speechSynthesis || null;
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
@@ -202,7 +201,7 @@
   // 中文基准约 4.45 字/秒（rate=1）；浏览器对 rate 的响应弱于标称值，用 0.45 次幂轻微缩放
   const BASE_CPS = 4.45;
   const TONE_RATE = 0.92; // 略慢以稳节奏，同时决定解说时长
-  const TONE_PITCH = 0.98;
+  const TONE_PITCH = 1.0;
   const effRate = () => clamp(narrRateVal * paceOf().rateMul * TONE_RATE, 0.6, 1.2);
   function estSec(id) {
     const item = NARR_MAP[id];
@@ -219,27 +218,15 @@
   let narrSpeaking = false;
   let introShown = false;
   let zhVoice = null;
-  let zhVoices = [];
   let noZhVoice = false;
   let utter = null;
   let narrAudio = null;
-  // Web Speech API 没有性别字段，只能用名字白名单近似判断女声
-  const FEMALE_RE = /(ting-ting|mei-jia|huihui|yaoyao|xiaoxiao|sin-ji|婷婷|美嘉|慧慧|瑶瑶|晓晓|女)/i;
-  let voiceKey = store.get('cs_voice_key', '') || '';
-  const vKey = (v) => (v.name || '') + '|' + (v.lang || '');
 
-  function pickVoice(list, key) {
-    if (!list.length) return null;
-    if (key) {
-      const hit = list.find((v) => vKey(v) === key);
-      if (hit) return hit;
-    }
-    const female = list.find((v) => FEMALE_RE.test(v.name || ''));
-    if (female) return female;
-    const local = list.find((v) => v.localService === true);
-    if (local) return local;
-    return list[0];
-  }
+  // 只认云健（YunJian）这一条网络声音：忽略大小写、空格与括号内容
+  const isYunJian = (v) => {
+    const name = (v.name || '').toLowerCase().replace(/\([^)]*\)/g, '').replace(/\s+/g, '');
+    return name.indexOf('yunjian') >= 0 || name.indexOf('云健') >= 0;
+  };
 
   function updateNarrControls() {
     narrToggle.textContent = narrOn ? '解说 开' : '解说 关';
@@ -247,42 +234,20 @@
     narrSpeakBtn.disabled = noZhVoice;
     narrStopBtn.disabled = noZhVoice;
     narrNote.hidden = !noZhVoice;
-    if (noZhVoice) narrNote.textContent = '当前系统未提供中文语音，可在系统中下载中文语音后在此选择。';
-  }
-
-  function renderVoiceList() {
-    if (!narrVoiceSel) return;
-    narrVoiceSel.innerHTML = '';
-    const auto = document.createElement('option');
-    auto.value = '';
-    auto.textContent = zhVoices.length
-      ? ('自动（优先女声' + (zhVoice && !voiceKey ? '：' + (zhVoice.name || '') : '') + '）')
-      : '无中文语音';
-    narrVoiceSel.appendChild(auto);
-    zhVoices.forEach((v) => {
-      const o = document.createElement('option');
-      o.value = vKey(v);
-      o.textContent = (v.name || '未命名') + (v.localService ? ' · 本地' : ' · 网络');
-      narrVoiceSel.appendChild(o);
-    });
-    const exists = voiceKey && Array.from(narrVoiceSel.options).some((o) => o.value === voiceKey);
-    narrVoiceSel.value = exists ? voiceKey : '';
+    if (noZhVoice) narrNote.textContent = '云健语音仅在 Edge 浏览器提供，当前浏览器已降级为文字解说。';
   }
 
   function refreshVoices() {
     if (!synth) {
+      zhVoice = null;
       noZhVoice = true;
-      zhVoices = [];
-      renderVoiceList();
       updateNarrControls();
       return;
     }
     const vs = synth.getVoices();
-    if (!vs.length) return; // Chrome 首次可能为空，等 voiceschanged
-    zhVoices = vs.filter((v) => /^zh/i.test(v.lang || ''));
-    zhVoice = pickVoice(zhVoices, voiceKey);
+    if (!vs.length) return; // 首次可能为空，等 voiceschanged
+    zhVoice = vs.find(isYunJian) || null;
     noZhVoice = !zhVoice;
-    renderVoiceList();
     updateNarrControls();
   }
 
@@ -292,9 +257,8 @@
     setTimeout(() => {
       refreshVoices();
       if (!synth.getVoices().length) {
+        zhVoice = null;
         noZhVoice = true;
-        zhVoices = [];
-        renderVoiceList();
         updateNarrControls();
       }
     }, 1800);
@@ -476,28 +440,6 @@
       ps.moveMs = total;
       ps.moveStart = performance.now() - p * total;
     }
-  }
-
-  // 切换声音：先取消旧语音，再用新声音重播当前条，不叠加
-  function reapplyNarrationTone() {
-    retimeCurrentBeat();
-    if (!narrSpeaking) return;
-    if (DAY0STATE.playing && playState && !playState.paused && !playState.speechDone) {
-      startBeatItem(playState.narrIdx);
-    } else {
-      speakCurrent();
-    }
-  }
-
-  if (narrVoiceSel) {
-    narrVoiceSel.addEventListener('change', () => {
-      voiceKey = narrVoiceSel.value;
-      store.set('cs_voice_key', voiceKey);
-      zhVoice = pickVoice(zhVoices, voiceKey);
-      noZhVoice = !zhVoice;
-      updateNarrControls();
-      reapplyNarrationTone();
-    });
   }
 
   showNarr('open');

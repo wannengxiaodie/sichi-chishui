@@ -930,30 +930,6 @@ body {
   accent-color: #a83326;
 }
 
-.narr-voices {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  margin-top: 7px;
-  padding-top: 7px;
-  border-top: 1px dashed rgba(201, 169, 97, .16);
-}
-
-.narr-voice-field select {
-  max-width: 148px;
-  text-overflow: ellipsis;
-}
-
-.narr-help {
-  flex: 1 1 100%;
-  margin: 0;
-  font-family: var(--sans);
-  font-size: 9px;
-  line-height: 1.55;
-  color: #8f8371;
-}
-
 /* 正在播报 */
 .panel.speaking { border-color: rgba(200, 80, 60, .55); }
 
