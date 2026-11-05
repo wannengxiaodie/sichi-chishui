@@ -351,7 +351,14 @@
       }
       done();
     };
-    synth.speak(utter);
+    // 语音可能被浏览器策略拒绝：静默降级为文字，不抛错、不阻塞推进
+    try {
+      if (synth.paused) synth.resume();
+      synth.speak(utter);
+    } catch (err) {
+      markSpeaking(false);
+      done();
+    }
   }
 
   function speakCurrent() { speakItem(currentNarrId); }
@@ -373,11 +380,11 @@
     if (narrOn) speakCurrent();
   }
 
-  function narrEnter() {
+  function narrEnter(silent) {
     if (!introShown) {
       introShown = true;
       showNarr('open');
-      if (narrOn) speakCurrent();
+      if (narrOn && !silent) speakCurrent();
       return;
     }
     // 再次进入只同步文字，不自动重播已播段落
@@ -473,8 +480,11 @@
       const go = () => {
         const ev = events.find((e) => e.id === crossEvent[g.dataset.cross]);
         if (!ev) return;
+        const entering = !sandboxEntered;
         enterSandbox();
         jumpToEvent(ev);
+        // 从总览点路线进入沙盘：落在该渡节点后继续自动播放；沙盘内点选节点只暂停
+        if (entering) scheduleAutoPlay();
       };
       g.addEventListener('click', go);
       g.addEventListener('keydown', (e) => {
@@ -493,12 +503,20 @@
   }
 
   function jumpToEvent(e) {
-    if (DAY0STATE.playing) pausePlayback();
-    playState = null;
+    // 点击节点/事件卡：立即暂停并停止语音，只同步文字
+    pauseForInspect();
     setDay(e.day, true);
     showEventCard(e);
     highlightAt(e.lon, e.lat, true);
-    narrEvent(e, true);
+    showNarr(e.id);
+  }
+
+  // 用户点选节点、事件卡、渡口卡时统一走这里：停画面、停语音、按钮回到“播放”
+  function pauseForInspect() {
+    clearTimeout(autoPlayTimer);
+    if (DAY0STATE.playing) pausePlayback();
+    else stopNarration();
+    playState = null; // 之后必须手动点播放，才从当前节点重新起一段
   }
 
   function setActiveChip(id) {
@@ -556,6 +574,8 @@
   function showFerryCard(id) {
     const f = STORY.ferries.find((x) => x.id === id);
     if (!f) return;
+    // 点渡口卡：暂停播放并停止语音，文字同步显示
+    pauseForInspect();
     DAY0STATE.ferryCard = id;
     panelKind.textContent = '渡口战况';
     panelDate.textContent = f.date;
@@ -572,18 +592,15 @@
     let tag = f.crossings[0];
     if (tag === '二渡' || tag === '四渡') tag = DAY0STATE.day >= 60 ? '四渡' : '二渡';
     const chapter = { 一渡: 'c1', 二渡: 'c2', 三渡: 'c3', 四渡: 'c4' }[tag];
-    if (chapter) narrChapter(chapter, true);
-    else {
-      const ev = events.find((x) => x.id === 'e13');
-      if (ev) narrEvent(ev, true);
-    }
+    if (chapter) showNarr(chapter);
+    else showNarr('e13');
   }
 
   panelClose.addEventListener('click', () => {
     DAY0STATE.ferryCard = null;
     const ev = currentEvent(DAY0STATE.day);
     showEventCard(ev);
-    narrEvent(ev, true);
+    showNarr(ev.id);
   });
 
   /* ---------------- 时间轴拖动 ---------------- */
@@ -596,8 +613,7 @@
 
   function startDrag(e) {
     dragging = true;
-    pausePlayback();
-    playState = null; // 手动定位后，播放从当前日期对应的节拍重新开始
+    pauseForInspect();
     tlKnob.style.cursor = 'grabbing';
     setDay(dayFromPointer(e.clientX));
     e.preventDefault();
@@ -629,6 +645,7 @@
      再按节奏档位停顿 1.2–1.8 秒，才进入下一节拍。 */
   let rafId = null;
   let playState = null;
+  let autoPlayTimer = null;
 
   const chapterForEvent = { e3: 'c1', e5: 'c2', e11: 'c3', e12: 'c4' };
   const BEATS = (function buildBeats() {
@@ -666,33 +683,38 @@
     if (!playState) return;
     if (playState.itemTimer) clearTimeout(playState.itemTimer);
     if (playState.guardTimer) clearTimeout(playState.guardTimer);
+    if (playState.startWatch) clearTimeout(playState.startWatch);
     playState.itemTimer = null;
     playState.guardTimer = null;
+    playState.startWatch = null;
   }
 
   function itemSeconds(ids) {
     return ids.reduce((s, id) => s + estSec(id), 0);
   }
 
-  function beginBeat(i) {
+  function beginBeat(i, fromDay) {
     clearBeatTimers();
     stopNarration();
     const beat = BEATS[i];
     const next = BEATS[i + 1];
     const endDay = next ? next.day : DAYS;
+    const startDay = typeof fromDay === 'number'
+      ? clamp(fromDay, beat.day, Math.max(beat.day, endDay - 0.001))
+      : beat.day;
     const estTotal = itemSeconds(beat.narrs);
-    const moveMs = endDay > beat.day ? Math.max(4000, estTotal * 0.86 * 1000) : 1;
+    const moveMs = endDay > startDay ? Math.max(4000, estTotal * 0.86 * 1000) : 1;
     playState = {
       i,
       beat,
       paused: false,
       finished: false,
-      startDay: beat.day,
+      startDay,
       endDay,
       moveMs,
       moveStart: performance.now(),
       moveElapsed: 0,
-      phase: endDay > beat.day ? 'move' : 'hold',
+      phase: endDay > startDay ? 'move' : 'hold',
       narrIdx: 0,
       speechDone: false,
       itemStart: 0,
@@ -701,10 +723,11 @@
       voiceDone: false,
       itemTimer: null,
       guardTimer: null,
+      startWatch: null,
       dwellStart: 0,
       dwellMs: paceOf().dwell * 1000
     };
-    setDay(beat.day);
+    setDay(startDay);
     if (beat.eventId) setActiveChip(beat.eventId);
     startBeatItem(0);
   }
@@ -720,7 +743,7 @@
     }
     const id = ps.beat.narrs[k];
     showNarr(id);
-    const shouldSpeak = narrOn && !noZhVoice && NARR_MAP[id];
+    const shouldSpeak = narrOn && !noZhVoice && !!NARR_MAP[id];
     const ms = estSec(id) * 1000;
     // 有语音时以 onend 为准，这里只保留 8 秒下限，避免“闪一下就过”
     const minMs = shouldSpeak ? Math.min(8000, ms) : ms;
@@ -741,6 +764,25 @@
         stopNarration();
         checkBeatItem();
       }, ms + 7000);
+      // 语音被浏览器拒绝（无手势/策略限制）时，1.5 秒内没有启动就静默降级为文字推进
+      if (synth && !NARR_MAP[id].audioSrc) {
+        ps.startWatch = setTimeout(() => {
+          if (playState !== ps || ps.paused || ps.finished) return;
+          if (synth.speaking || synth.pending) return;
+          ps.voiceDone = true;
+          markSpeaking(false);
+          if (ps.guardTimer) clearTimeout(ps.guardTimer);
+          ps.guardTimer = null;
+          // 改用文字估算时长推进，不再等待 8 秒下限
+          if (ps.itemTimer) clearTimeout(ps.itemTimer);
+          const left = Math.max(1200, ps.itemMs - (performance.now() - ps.itemStart));
+          ps.itemTimer = setTimeout(() => {
+            if (playState !== ps) return;
+            ps.minElapsed = true;
+            checkBeatItem();
+          }, left);
+        }, 1500);
+      }
       speakItem(id, () => {
         if (playState !== ps) return;
         ps.voiceDone = true;
@@ -780,7 +822,7 @@
       ps.dwellStart = 0;
     }
     DAY0STATE.playing = false;
-    playBtn.textContent = '播放';
+    playBtn.textContent = '重播四渡';
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
     setDay(DAYS);
@@ -819,8 +861,9 @@
       if (ps.speechDone) ps.dwellStart = performance.now();
       else startBeatItem(ps.narrIdx);
     } else {
+      // 从当前时间轴位置起播，进度归零，不回跳
       const idx = (DAY0STATE.day >= DAYS) ? 0 : beatForDay(DAY0STATE.day);
-      beginBeat(idx);
+      beginBeat(idx, DAY0STATE.day >= DAYS ? 0 : DAY0STATE.day);
     }
     DAY0STATE.playing = true;
     playBtn.textContent = '暂停';
@@ -910,10 +953,25 @@
       history.pushState({ sandbox: true }, '', '#sandbox');
     }
     scrollToStage(false);
-    narrEnter();
+    // 解说交给自动播放统一出声，避免开篇被朗读两遍
+    narrEnter(true);
+    scheduleAutoPlay();
+  }
+
+  // 进入沙盘后自动开播：等滚动落位再从当前时间轴位置起播，进度归零
+  function scheduleAutoPlay() {
+    clearTimeout(autoPlayTimer);
+    autoPlayTimer = setTimeout(() => {
+      autoPlayTimer = null;
+      if (!sandboxEntered || !stageInView() || DAY0STATE.playing) return;
+      if (playState && playState.paused) playState = null;
+      startPlayback();
+    }, 420);
   }
 
   function restoreOverview() {
+    clearTimeout(autoPlayTimer);
+    autoPlayTimer = null;
     pausePlayback();
     if (DAY0STATE.ferryCard) {
       DAY0STATE.ferryCard = null;
@@ -948,6 +1006,8 @@
     if (history.state && history.state.sandbox) {
       pendingHistoryExit = false;
       scrollToStage(true);
+      sandboxEntered = true;
+      scheduleAutoPlay();
       return;
     }
     if (pendingHistoryExit || sandboxEntered) {
