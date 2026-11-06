@@ -39,10 +39,10 @@
     const dv = new DataView(bytes.buffer);
     for (let i = 0; i < NX * NZ; i++) heights[i] = dv.getInt16(i * 2, true);
 
-    // 平滑去采样噪点，保留脊线与沟谷（5 抽头高斯，横纵三遍）
+    // 平滑去采样噪点，保留脊线与沟谷（5 抽头高斯，横纵两遍）
     const tmp = new Float32Array(NX * NZ);
     const ker = [1, 4, 6, 4, 1];
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < 2; pass++) {
       for (let z = 0; z < NZ; z++) {
         for (let x = 0; x < NX; x++) {
           let s = 0, w = 0;
@@ -62,6 +62,16 @@
           }
           heights[z * NX + x] = s / w;
         }
+      }
+    }
+
+    // 轻量锐化：把被高斯平滑抹平的山脊补回来一点，保持等高线的锐度
+    const base = Float32Array.from(heights);
+    for (let z = 1; z < NZ - 1; z++) {
+      for (let x = 1; x < NX - 1; x++) {
+        const i = z * NX + x;
+        const avg = (base[i - 1] + base[i + 1] + base[i - NX] + base[i + NX]) * 0.25;
+        heights[i] = base[i] + (base[i] - avg) * 0.3;
       }
     }
   })();
@@ -923,8 +933,9 @@
   let renderer = null;
   let scene, camera, clock;
   let camTarget, camTheta, camPhi, camRadius, goalTheta, goalPhi, goalRadius, goalTarget;
-  let terrainMesh, riverGroup, arrowGroup, enemyGroup, ferryGroup, highlightRing;
+  let terrainMesh, riverGroup, arrowGroup, enemyGroup, ferryGroup, highlightRing, cloudGroup;
   let labelItems = [];
+  let plaqueEls = [];
   const raycaster = new THREE.Raycaster();
   const pointerNdc = new THREE.Vector2();
   let stageVisible = true;
@@ -1049,10 +1060,11 @@
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.12;
 
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x1b2822, 0.0042);
+    // 暖灰绿空气透视，模拟高空远景的薄雾
+    scene.fog = new THREE.FogExp2(0x2d3728, 0.0034);
     clock = new THREE.Clock();
 
     camera = new THREE.PerspectiveCamera(42, canvas.clientWidth / canvas.clientHeight, 0.1, 320);
@@ -1065,15 +1077,21 @@
     scene.add(new THREE.AmbientLight(0x5d6f60, 0.34));
     scene.add(new THREE.HemisphereLight(0x93a795, 0x0c120e, 0.36));
 
-    const sun = new THREE.DirectionalLight(0xf3f0df, 1.08);
+    const sun = new THREE.DirectionalLight(0xf6ecd5, 1.12);
     sun.position.set(-34, 46, 20);
     scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x56707a, 0.24);
+    // 低角度暖光：让山脊西侧出现纪录片式的金边
+    const warm = new THREE.DirectionalLight(0xffb877, 0.42);
+    warm.position.set(-46, 12, 34);
+    scene.add(warm);
+
+    const fill = new THREE.DirectionalLight(0x5c7480, 0.22);
     fill.position.set(30, 20, -26);
     scene.add(fill);
 
     buildTerrain();
+    buildClouds();
     buildBase();
     buildRiver();
     buildFerries();
@@ -1159,13 +1177,15 @@
     geo.computeVertexNormals();
 
     const nor = geo.attributes.normal;
-    const cValley = new THREE.Color(0x3c5b49);
-    const cBank = new THREE.Color(0x4a6c55);
-    const cMid = new THREE.Color(0x1d3a29);
-    const cMidHigh = new THREE.Color(0x2a4a38);
-    const cStone = new THREE.Color(0x5a6d70);
-    const cRock = new THREE.Color(0x6e5a3e);
-    const cRidge = new THREE.Color(0xd2c3a2);
+    // 取色参照真实卫星地形：谷地草甸偏黄绿、山体森林深绿、裸岩暖褐、最高脊线浅灰米白
+    const cValley = new THREE.Color(0x3b5a33);
+    const cBank = new THREE.Color(0x4a6330);
+    const cMid = new THREE.Color(0x1b3318);
+    const cMidHigh = new THREE.Color(0x2b4720);
+    const cStone = new THREE.Color(0x7d8064);
+    const cRock = new THREE.Color(0x7d6742);
+    const cRidge = new THREE.Color(0xbcb083);
+    const cSnow = new THREE.Color(0xe4e8da);
     const sunDir = new THREE.Vector3(-0.45, 0.78, 0.32).normalize();
     const n = new THREE.Vector3();
     const col = new THREE.Color();
@@ -1173,17 +1193,17 @@
     for (let i = 0; i < count; i++) {
       const h = hs[i];
       const e = clamp((h - 280) / (1980 - 280), 0, 1);
-      const c = clamp(h - 100, 0, 1);
       n.set(nor.getX(i), nor.getY(i), nor.getZ(i));
       const slope = Math.hypot(n.x, n.z) / Math.max(Math.abs(n.y), 0.06);
 
       if (e < 0.3) col.copy(cValley).lerp(cBank, e / 0.3);
-      else if (e < 0.62) col.copy(cBank).lerp(cMid, (e - 0.3) / 0.32);
-      else if (e < 0.84) col.copy(cMid).lerp(cMidHigh, (e - 0.62) / 0.22);
+      else if (e < 0.6) col.copy(cBank).lerp(cMid, (e - 0.3) / 0.3);
+      else if (e < 0.84) col.copy(cMid).lerp(cMidHigh, (e - 0.6) / 0.24);
       else col.copy(cMidHigh).lerp(cStone, clamp((e - 0.84) / 0.16, 0, 1));
 
-      const rock = clamp((slope - 1.5) * 0.7, 0, 1) * (0.12 + 0.3 * smooth(0.55, 0.95, e));
-      if (rock > 0) col.lerp(cRock, Math.min(rock, 0.4));
+      // 陡坡露岩：低处偏暖褐，高处偏灰白
+      const rock = clamp((slope - 1.35) * 0.72, 0, 1) * (0.15 + 0.34 * smooth(0.5, 0.95, e));
+      if (rock > 0) col.lerp(cRock, Math.min(rock, 0.46));
 
       // 山脊高光：局部凸起
       const iz = Math.min(Math.round(i / cols) * step, NZ - 1);
@@ -1192,18 +1212,21 @@
       const lap = 4 * heights[idx] -
         (heights[Math.max(idx - 1, 0)] + heights[Math.min(idx + 1, NX * NZ - 1)] +
           heights[Math.max(idx - NX, 0)] + heights[Math.min(idx + NX, NX * NZ - 1)]);
-      const ridge = clamp((lap - 2) / 16, 0, 1) * 0.22;
+      const ridge = clamp((lap - 2) / 16, 0, 1) * 0.16;
       if (ridge > 0) col.lerp(cRidge, ridge);
 
-      const shade = 0.82 + Math.max(0, n.dot(sunDir)) * 0.26 + (e - 0.5) * 0.04;
-      let noise = Math.sin(i * 12.9898) * 43758.5453;
+      // 最高峰顶的浅色岩盖（参照远景雪线）
+      const cap = smooth(0.94, 0.995, e) * smooth(1.6, 2.6, slope);
+      if (cap > 0) col.lerp(cSnow, cap * 0.34);
+
+      const shade = 0.66 + Math.max(0, n.dot(sunDir)) * 0.34 + (e - 0.5) * 0.05;
+      let noise = Math.sin(idx * 12.9898) * 43758.5453;
       noise = noise - Math.floor(noise);
-      col.multiplyScalar(shade * (0.95 + noise * 0.1));
+      col.multiplyScalar(shade * (0.94 + noise * 0.1));
 
       colors[i * 3] = col.r;
       colors[i * 3 + 1] = col.g;
       colors[i * 3 + 2] = col.b;
-      void c;
     }
 
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -1222,6 +1245,83 @@
   function smooth(a, b, v) {
     const t = clamp((v - a) / (b - a), 0, 1);
     return t * t * (3 - 2 * t);
+  }
+
+  /* ---------------- 云层 ----------------
+     参照纪录片式沙盘：白色积云成团贴在山脊上，少量高空薄云，缓慢漂移。 */
+  function cloudTexture(seed) {
+    const SZ = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = SZ;
+    const ctx = c.getContext('2d');
+    const rnd = mulberry(seed);
+    for (let i = 0; i < 9; i++) {
+      const r = SZ * (0.1 + rnd() * 0.16);
+      const x = SZ * (0.22 + rnd() * 0.56);
+      const y = SZ * (0.34 + rnd() * 0.34);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const a = 0.16 + rnd() * 0.16;
+      g.addColorStop(0, 'rgba(255,255,255,' + a.toFixed(3) + ')');
+      g.addColorStop(0.55, 'rgba(252,252,248,' + (a * 0.55).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(250,250,246,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  function mulberry(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function buildClouds() {
+    cloudGroup = new THREE.Group();
+    const rnd = mulberry(20261106);
+    const puffs = 22;
+    for (let i = 0; i < puffs; i++) {
+      const lon = W + (0.1 + rnd() * 0.8) * (E - W);
+      const lat = S + (0.1 + rnd() * 0.8) * (N - S);
+      const base = terrainY(lon, lat);
+      const high = i % 5 === 0;
+      const tex = cloudTexture(i * 37 + 11);
+      const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthWrite: false, depthTest: true,
+        opacity: high ? 0.24 + rnd() * 0.12 : 0.34 + rnd() * 0.24,
+        color: 0xf6f8f2, fog: true
+      });
+      const sp = new THREE.Sprite(mat);
+      const w = high ? 15 + rnd() * 13 : 8 + rnd() * 10;
+      const h = w * (0.34 + rnd() * 0.14);
+      sp.scale.set(w, h, 1);
+      sp.position.set(toX(lon), base + (high ? 7 + rnd() * 5 : 1.4 + rnd() * 2.4), toZ(lat));
+      sp.userData = { x0: sp.position.x, range: 5 + rnd() * 6 };
+      cloudGroup.add(sp);
+    }
+    // 几团压在脊线上的“主角云”，保证全景视角也能读到云的存在
+    [[105.72, 28.52, 13], [106.22, 28.60, 15], [106.58, 28.30, 12], [105.96, 27.96, 11]].forEach((c, i) => {
+      const mat = new THREE.SpriteMaterial({
+        map: cloudTexture(900 + i * 13), transparent: true, depthWrite: false,
+        depthTest: true, opacity: 0.55 + i * 0.03, color: 0xfbfcf7, fog: true
+      });
+      const sp = new THREE.Sprite(mat);
+      const w = c[2] + 4;
+      sp.scale.set(w, w * 0.44, 1);
+      sp.position.set(toX(c[0]), terrainY(c[0], c[1]) + 4.6 + i * 0.7, toZ(c[1]));
+      sp.userData = { x0: sp.position.x, range: 3 + i * 1.2 };
+      cloudGroup.add(sp);
+    });
+
+    cloudGroup.renderOrder = 8;
+    scene.add(cloudGroup);
   }
 
   function buildBase() {
@@ -1290,28 +1390,28 @@
     if (pts.length < 4) return;
 
     const bank = new THREE.Mesh(
-      surfaceRibbon(pts, 0.92, 0.3, 180, 4),
+      surfaceRibbon(pts, 0.64, 0.3, 180, 4),
       new THREE.MeshStandardMaterial({
-        color: 0x2a4b42, roughness: 0.95, transparent: true, opacity: 0.5,
+        color: 0x2a4b3e, roughness: 0.95, transparent: true, opacity: 0.5,
         depthWrite: false, side: THREE.DoubleSide
       })
     );
     riverGroup.add(bank);
 
     const shallow = new THREE.Mesh(
-      surfaceRibbon(pts, 0.62, 0.34, 200, 5),
+      surfaceRibbon(pts, 0.44, 0.34, 200, 5),
       new THREE.MeshStandardMaterial({
-        color: 0x5aa695, roughness: 0.85, transparent: true, opacity: 0.6,
+        color: 0x6fb9a5, roughness: 0.85, transparent: true, opacity: 0.48,
         depthWrite: false, side: THREE.DoubleSide
       })
     );
     riverGroup.add(shallow);
 
     const water = new THREE.Mesh(
-      surfaceRibbon(pts, 0.4, 0.38, 220, 5),
+      surfaceRibbon(pts, 0.28, 0.38, 220, 5),
       new THREE.MeshStandardMaterial({
-        color: 0x58a99a, roughness: 0.3, metalness: 0.08,
-        emissive: 0x2b6b60, emissiveIntensity: 0.75,
+        color: 0x62bfae, roughness: 0.3, metalness: 0.08,
+        emissive: 0x2f7a6c, emissiveIntensity: 0.8,
         side: THREE.DoubleSide
       })
     );
@@ -1468,7 +1568,7 @@
         '#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n' +
         'float csRim = pow(clamp(length(cross(normalize(normal), normalize(vViewPosition))), 0.0, 1.0), 2.4);\n' +
-        'totalEmissiveRadiance += vec3(0.95, 0.50, 0.36) * csRim * 0.42;'
+        'totalEmissiveRadiance += vec3(0.95, 0.44, 0.30) * csRim * 0.26;'
       );
     };
   }
@@ -1696,6 +1796,84 @@
     return g;
   }
 
+  // 外发光：参照视频里金色路线的那层柔光，改成红色系，垫在箭头下方
+  let arrowGlowTex = null;
+  function arrowGlowTexture() {
+    if (arrowGlowTex) return arrowGlowTex;
+    const c = document.createElement('canvas');
+    c.width = 8; c.height = 64;
+    const ctx = c.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, 64);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.2, 'rgba(255,255,255,.26)');
+    g.addColorStop(0.5, 'rgba(255,255,255,.92)');
+    g.addColorStop(0.8, 'rgba(255,255,255,.26)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 8, 64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    arrowGlowTex = tex;
+    return tex;
+  }
+
+  function buildArrowGlow(curve) {
+    const n = Math.max(24, Math.ceil(curve.getLength() / 0.32));
+    const across = [0, 0.25, 0.5, 0.75, 1];
+    const stride = across.length;
+    const pos = [];
+    const uv = [];
+    const idx = [];
+    const tan = new THREE.Vector3();
+    const side = new THREE.Vector3();
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const p = curve.getPoint(t);
+      tan.copy(curve.getTangent(t)).setY(0);
+      if (tan.lengthSq() < 1e-10) tan.set(0, 0, 1);
+      tan.normalize();
+      side.set(-tan.z, 0, tan.x);
+      const w = ARROW_HALF * AW(t) * 2.9;
+      for (let j = 0; j < stride; j++) {
+        const s = across[j] * 2 - 1;
+        pos.push(p.x + side.x * s * w, arrowBaseY - 0.05, p.z + side.z * s * w);
+        uv.push(0.5, across[j]);
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < stride - 1; j++) {
+        const a = i * stride + j, b = a + 1, c = a + stride, d = c + 1;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.userData = { segs: n, idxPerSeg: (stride - 1) * 6 };
+    return g;
+  }
+
+  // 行进前端的高光点：模拟视频里路线头的亮核
+  let arrowTipTex = null;
+  function arrowTipTexture() {
+    if (arrowTipTex) return arrowTipTex;
+    const SZ = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = SZ;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(SZ / 2, SZ / 2, 0, SZ / 2, SZ / 2, SZ / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.22, 'rgba(255,214,180,.72)');
+    g.addColorStop(0.55, 'rgba(255,120,72,.24)');
+    g.addColorStop(1, 'rgba(255,90,50,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, SZ, SZ);
+    arrowTipTex = new THREE.CanvasTexture(c);
+    return arrowTipTex;
+  }
+
   const headGeo = buildArrowHeadGeo();
 
   function buildArrows() {
@@ -1736,13 +1914,39 @@
       tuneArrowMaterial(mat);
       mats.push(mat);
 
+      // 外发光材质：视频里金线的柔光做法，按红色主色降低色相亮度
+      const glowColor = new THREE.Color(cross.color).lerp(new THREE.Color(0xff7a52), 0.3);
+      const glowMat = new THREE.MeshBasicMaterial({
+        map: arrowGlowTexture(), color: glowColor, transparent: true,
+        opacity: 0.22, blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false, side: THREE.DoubleSide, fog: false
+      });
+
+      // 路线前端亮核
+      const tip = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: arrowTipTexture(), color: 0xffbe98, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false
+      }));
+      tip.scale.set(3.4, 3.4, 1);
+      tip.visible = false;
+      tip.renderOrder = 25;
+      arrowGroup.add(tip);
+      cross._tip = tip;
+
       cross.stages.forEach((stage) => {
         const s = sampleArrow(stage);
         const shaftGeo = buildArrowShaft(s.pts, s.ts);
         const rimGeo = buildArrowRim(s.pts, s.ts);
         const shadowGeo = buildArrowShadow(s.curve);
+        const glowGeo = buildArrowGlow(s.curve);
 
         const baseOrder = 20 + (cross.no - 1) * 2;
+
+        // 外发光：垫在箭身之下，形成一圈暖红光晕
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glow.visible = false;
+        glow.renderOrder = baseOrder - 0.5;
+        arrowGroup.add(glow);
 
         // 贴地阴影：在地形之上、箭头之下
         const shadow = new THREE.Mesh(shadowGeo, shadowMat);
@@ -1774,14 +1978,18 @@
         stage._shaft = shaft;
         stage._rim = rim;
         stage._head = head;
+        stage._glow = glow;
         stage._shadow = shadow;
         stage._shadowPerSeg = shadowGeo.userData.idxPerSeg;
         stage._rimPerSeg = rimGeo.userData.idxPerSeg;
+        stage._glowSegs = glowGeo.userData.segs;
+        stage._glowPerSeg = glowGeo.userData.idxPerSeg;
         const triCount = (g) => (g.index ? g.index.count : g.attributes.position.count) / 3;
         stage._tris = {
           shaft: triCount(shaftGeo),
           rim: triCount(rimGeo),
           shadow: triCount(shadowGeo),
+          glow: triCount(glowGeo),
           head: triCount(headGeo)
         };
       });
@@ -1844,6 +2052,23 @@
     STORY.enemies.forEach((en) => {
       const el = makeLabel('enemy', '<i class="bar"></i><span class="txt">' + en.name + '<em>' + en.sub + '</em></span>');
       labelItems.push({ el, lon: en.lon, lat: en.lat, dx: 16, dy: -8, kind: 'enemy' });
+    });
+
+    // 四渡木牌：参照视频里的红底白字竖牌，作为四渡的空间索引
+    const PLAQUES = [
+      { no: 1, name: '一渡赤水', lon: 105.916, lat: 28.352, dx: -46, dy: -34 },
+      { no: 2, name: '二渡赤水', lon: 106.076, lat: 28.208, dx: 42, dy: -64 },
+      { no: 3, name: '三渡赤水', lon: 106.428, lat: 27.892, dx: 56, dy: -40 },
+      { no: 4, name: '四渡赤水', lon: 106.160, lat: 28.078, dx: 78, dy: 28 }
+    ];
+    PLAQUES.forEach((pl) => {
+      const el = makeLabel('plaque', '<span class="txt">' + pl.name + '</span>');
+      el.dataset.no = pl.no;
+      plaqueEls.push(el);
+      labelItems.push({
+        el, lon: pl.lon, lat: pl.lat, dx: pl.dx, dy: pl.dy, kind: 'plaque', no: pl.no,
+        y: (arrowBaseY || 0) + 1.1
+      });
     });
   }
 
@@ -1969,6 +2194,7 @@
         stage._p = p;
         stage._shaft.visible = active && p > 0.01;
         stage._rim.visible = stage._shaft.visible;
+        stage._glow.visible = stage._shaft.visible;
         stage._shadow.visible = active && p > 0.02;
         if (!stage._shaft.visible) {
           stage._head.visible = false;
@@ -1978,6 +2204,9 @@
         const grown = Math.max(1, Math.floor(segs * p));
         const shaftLen = stage._cap + grown * stage._idxPerSeg;
         stage._shaft.geometry.setDrawRange(0, shaftLen);
+        // 发光带比箭身略早收尾，避免在箭镞下透出圆头光斑
+        stage._glow.geometry.setDrawRange(0,
+          Math.max(1, Math.floor(stage._glowSegs * p)) * stage._glowPerSeg);
         // 描边窄带不进入箭镞覆盖区，避免在镞体下透出深色折线
         const trim = Math.ceil(((HEAD_OVERLAP + 0.18) / (stage._len || 1)) * segs);
         stage._rim.geometry.setDrawRange(0, Math.max(0, grown - trim) * stage._rimPerSeg);
@@ -2006,6 +2235,14 @@
       if (lead) {
         lead._head.visible = true;
         currentHeads.push({ pos: lead._lead.pos, tan: lead._lead.tan, cross, end: lead._lead.end, d1: lead._lead.d1 });
+        if (cross._tip) {
+          cross._tip.visible = true;
+          cross._tip.position.set(lead._lead.pos.x, lead._lead.pos.y + 0.32, lead._lead.pos.z);
+          const pulse = 0.86 + Math.sin(performance.now() * 0.006) * 0.14;
+          cross._tip.material.opacity = 0.72 * pulse;
+        }
+      } else if (cross._tip) {
+        cross._tip.visible = false;
       }
     });
 
@@ -2032,6 +2269,13 @@
       m.material.color.setHex(active ? 0xef7a5c : 0xc9a961);
       m.scale.setScalar(active ? 1.25 + Math.sin(performance.now() * 0.004) * 0.1 : 1);
       m.material.opacity = active ? 0.95 : 0.7;
+    });
+
+    // 四渡木牌：当前渡次点亮，其余淡出
+    plaqueEls.forEach((el) => {
+      const c = crossings.find((x) => x.no === Number(el.dataset.no));
+      const on = !!c && day >= c.day0 - 1 && day <= c.day1 + 4;
+      el.classList.toggle('active', on);
     });
   }
 
@@ -2087,6 +2331,13 @@
       });
     }
 
+    // 云层极缓漂移
+    if (cloudGroup) {
+      cloudGroup.children.forEach((sp, i) => {
+        sp.position.x = sp.userData.x0 + Math.sin(t * 0.00007 + i * 0.8) * sp.userData.range;
+      });
+    }
+
     projectLabels();
     renderer.render(scene, camera);
     if (window.__CS_DEBUG) {
@@ -2125,7 +2376,8 @@
     const w = canvas.clientWidth, h = canvas.clientHeight;
     const v = new THREE.Vector3();
     labelItems.forEach((it) => {
-      v.copy(worldPos(it.lon, it.lat, 0.35));
+      if (it.y != null) v.set(toX(it.lon), it.y, toZ(it.lat));
+      else v.copy(worldPos(it.lon, it.lat, 0.35));
       v.project(camera);
       const x = (v.x * 0.5 + 0.5) * w;
       const y = (-v.y * 0.5 + 0.5) * h;
