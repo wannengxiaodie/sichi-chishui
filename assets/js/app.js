@@ -189,36 +189,43 @@
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 隐私模式忽略 */ } }
   };
 
-  /* 节奏档位：只调整停顿与基准语速，不改史实顺序 */
+  /* 节奏档位：只调整停顿，不再改语速（避免与语速档位相乘） */
   const PACES = {
-    calm: { label: '舒缓', dwell: 1.8, rateMul: 0.88 },
-    normal: { label: '标准', dwell: 1.5, rateMul: 1.0 },
-    tight: { label: '紧凑', dwell: 1.2, rateMul: 1.12 }
+    calm: { label: '舒缓', dwell: 1.8 },
+    normal: { label: '标准', dwell: 1.5 },
+    tight: { label: '紧凑', dwell: 1.2 }
   };
   let paceKey = store.get('cs_narr_pace', 'normal');
   if (!PACES[paceKey]) paceKey = 'normal';
   const paceOf = () => PACES[paceKey] || PACES.normal;
-  // 中文基准约 4.45 字/秒（rate=1）；浏览器对 rate 的响应弱于标称值，用 0.45 次幂轻微缩放
-  const BASE_CPS = 4.45;
-  const TONE_RATE = 0.92; // 略慢以稳节奏，同时决定解说时长
-  const TONE_PITCH = 1.0;
-  const effRate = () => clamp(narrRateVal * paceOf().rateMul * TONE_RATE, 0.6, 1.2);
+
+  // 语速档位：档位值即有效 rate，默认 1.0 = 实际 1.0，不叠加任何隐藏系数
+  const RATE_PRESETS = [0.8, 0.9, 1, 1.25, 1.5, 2];
+  const BASE_CPS = 4.45; // 中文基准约 4.45 字/秒（rate=1）
+  const parseRate = (v) => {
+    const n = parseFloat(v);
+    if (!isFinite(n)) return 1;
+    return RATE_PRESETS.reduce((best, r) => (Math.abs(r - n) < Math.abs(best - n) ? r : best), 1);
+  };
+  const effRate = () => clamp(narrRateVal, RATE_PRESETS[0], RATE_PRESETS[RATE_PRESETS.length - 1]);
   function estSec(id) {
     const item = NARR_MAP[id];
     if (!item) return 8;
     if (typeof item.duration === 'number' && item.duration > 0) return item.duration;
-    return Math.max(8, item.text.length / (BASE_CPS * Math.pow(effRate(), 0.45)));
+    // 段时长与语速成反比：2 倍速时约为一半，保证档位线性
+    return Math.max(2, item.text.length / (BASE_CPS * effRate()));
   }
 
   let narrOn = store.get('cs_narr_on', '1') !== '0';
-  let narrRateVal = parseFloat(store.get('cs_narr_rate', '1')) || 1;
+  let narrRateVal = parseRate(store.get('cs_narr_rate', '1'));
   let narrVolVal = parseFloat(store.get('cs_narr_vol', '1'));
   if (!isFinite(narrVolVal)) narrVolVal = 1;
   let currentNarrId = 'open';
   let narrSpeaking = false;
   let introShown = false;
-  let zhVoice = null;
-  let noZhVoice = false;
+  let zhVoice = null;   // 当前选中的声音（可能是云健，也可能是系统声音）
+  let noVoice = false;  // 完全没有可用声音时才降级为文字
+  let voicePick = { tier: 0, name: '', lang: '', localService: false };
   let utter = null;
   let narrAudio = null;
 
@@ -228,26 +235,61 @@
     return name.indexOf('yunjian') >= 0 || name.indexOf('云健') >= 0;
   };
 
+  const isZh = (v) => /^zh/i.test(v.lang || '');
+  const ZH_ORDER = ['zh-cn', 'zh-sg', 'zh-tw', 'zh-hk'];
+  const zhRank = (v) => {
+    const l = (v.lang || '').toLowerCase().replace('_', '-');
+    const i = ZH_ORDER.indexOf(l);
+    return i < 0 ? ZH_ORDER.length : i;
+  };
+  // 常见系统中文声音名（婷婷 / Ting-Ting / 美嘉 等）
+  const COMMON_ZH_NAME = /婷婷|ting-?ting|美嘉|mei-?jia|小燕|xiaoyan/i;
+
+  // 三级优先级：云健 → 系统中文默认 → 任意中文 → 浏览器默认（允许非中文）
+  function pickVoice(vs) {
+    const yj = vs.find(isYunJian);
+    if (yj) return { voice: yj, tier: 1 };
+    const zh = vs.filter(isZh).sort((a, b) => zhRank(a) - zhRank(b));
+    const defZh = zh.find((v) => v.default === true);
+    if (defZh) return { voice: defZh, tier: 2 };
+    const common = zh.find((v) => v.localService === true && COMMON_ZH_NAME.test(v.name || ''));
+    if (common) return { voice: common, tier: 2 };
+    if (zh.length) return { voice: zh[0], tier: 3 };
+    const def = vs.find((v) => v.default === true) || vs[0];
+    return def ? { voice: def, tier: 4 } : null;
+  }
+
+  function syncNarrDebug() {
+    if (window.__CS_DEBUG) {
+      window.__csNarr = { rate: effRate(), noVoice, voice: voicePick };
+    }
+  }
+
   function updateNarrControls() {
     narrToggle.textContent = narrOn ? '解说 开' : '解说 关';
     narrToggle.setAttribute('aria-pressed', String(narrOn));
-    narrSpeakBtn.disabled = noZhVoice;
-    narrStopBtn.disabled = noZhVoice;
-    narrNote.hidden = !noZhVoice;
-    if (noZhVoice) narrNote.textContent = '云健语音仅在 Edge 浏览器提供，当前浏览器已降级为文字解说。';
+    narrSpeakBtn.disabled = noVoice;
+    narrStopBtn.disabled = noVoice;
+    narrNote.hidden = !noVoice;
+    if (noVoice) narrNote.textContent = '当前系统未提供可用语音，已降级为文字解说。';
+    syncNarrDebug();
   }
 
   function refreshVoices() {
     if (!synth) {
       zhVoice = null;
-      noZhVoice = true;
+      noVoice = true;
       updateNarrControls();
       return;
     }
     const vs = synth.getVoices();
     if (!vs.length) return; // 首次可能为空，等 voiceschanged
-    zhVoice = vs.find(isYunJian) || null;
-    noZhVoice = !zhVoice;
+    const pick = pickVoice(vs);
+    zhVoice = pick ? pick.voice : null;
+    noVoice = !zhVoice;
+    voicePick = pick
+      ? { tier: pick.tier, name: pick.voice.name, lang: pick.voice.lang, localService: !!pick.voice.localService }
+      : { tier: 0, name: '', lang: '', localService: false };
     updateNarrControls();
   }
 
@@ -258,12 +300,12 @@
       refreshVoices();
       if (!synth.getVoices().length) {
         zhVoice = null;
-        noZhVoice = true;
+        noVoice = true;
         updateNarrControls();
       }
     }, 1800);
   } else {
-    noZhVoice = true;
+    noVoice = true;
   }
 
   function markSpeaking(on) {
@@ -331,22 +373,23 @@
       narrAudio.play().catch(() => { if (token !== narrToken) return; markSpeaking(false); done(); });
       return;
     }
-    if (!synth || noZhVoice) {
+    if (!synth || noVoice) {
       markSpeaking(false);
       return;
     }
     utter = new SpeechSynthesisUtterance(item.text);
-    utter.lang = 'zh-CN';
+    utter.lang = (zhVoice && zhVoice.lang) || 'zh-CN';
     if (zhVoice) utter.voice = zhVoice;
     utter.rate = effRate();
-    utter.pitch = TONE_PITCH;
+    // 云健保持原声，系统回退声音略压暗一点更自然
+    utter.pitch = isYunJian(zhVoice || {}) ? 1.0 : 0.98;
     utter.volume = narrVolVal;
     utter.onend = () => { if (token !== narrToken) return; markSpeaking(false); done(); };
     utter.onerror = (e) => {
       if (token !== narrToken) return;
       markSpeaking(false);
       if (e && /language|voice/i.test(e.error || '')) {
-        noZhVoice = true;
+        noVoice = true;
         updateNarrControls();
       }
       done();
@@ -418,17 +461,34 @@
   });
 
   narrPace.value = paceKey;
-  narrRate.value = String(narrRateVal);
   narrVol.value = String(narrVolVal);
   narrPace.addEventListener('change', () => {
     paceKey = PACES[narrPace.value] ? narrPace.value : 'normal';
     store.set('cs_narr_pace', paceKey);
     retimeCurrentBeat();
   });
-  narrRate.addEventListener('change', () => {
-    narrRateVal = parseFloat(narrRate.value) || 1;
-    store.set('cs_narr_rate', String(narrRateVal));
-    retimeCurrentBeat();
+
+  // 语速分段控件：按钮值即有效 rate
+  const rateBtns = $$('.rate-seg');
+  function syncRateUI() {
+    rateBtns.forEach((b) => {
+      const on = Math.abs(parseFloat(b.dataset.rate) - narrRateVal) < 1e-6;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    syncNarrDebug();
+  }
+  syncRateUI();
+  narrRate.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rate-seg');
+    if (!btn) return;
+    const v = parseFloat(btn.dataset.rate);
+    if (!isFinite(v) || v === narrRateVal) return;
+    narrRateVal = v;
+    store.set('cs_narr_rate', String(v));
+    syncRateUI();
+    // 正在播报时以新速率重播当前条；否则只重排本段时长
+    retimeCurrentBeat(true);
   });
   narrVol.addEventListener('input', () => {
     narrVolVal = parseFloat(narrVol.value);
@@ -436,8 +496,8 @@
     store.set('cs_narr_vol', String(narrVolVal));
   });
 
-  // 节奏/语速变化后按新参数重排当前节拍的时间（不打断正在朗读的这一条）
-  function retimeCurrentBeat() {
+  // 节奏/语速变化后按新参数重排当前节拍的时间；换档时按新速率重播当前条
+  function retimeCurrentBeat(replay) {
     const ps = playState;
     if (!ps || ps.finished) return;
     ps.dwellMs = paceOf().dwell * 1000;
@@ -447,54 +507,11 @@
       ps.moveMs = total;
       ps.moveStart = performance.now() - p * total;
     }
+    if (replay && DAY0STATE.playing) startBeatItem(ps.narrIdx);
   }
 
   showNarr('open');
   updateNarrControls();
-
-  /* ---------------- 2D 路线示意：悬停高亮 / 点击跳转 ---------------- */
-  (function bindSchematic() {
-    const routes = $$('.sch-route');
-    if (!routes.length) return;
-    const crossEvent = { c1: 'e3', c2: 'e5', c3: 'e11', c4: 'e12' };
-
-    function focusRoute(id) {
-      routes.forEach((g) => {
-        const on = g.dataset.cross === id;
-        g.classList.toggle('active', on);
-        g.classList.toggle('dim', !!id && !on);
-      });
-    }
-
-    routes.forEach((g) => {
-      // 用 pointerover/out（可冒泡）而非 enter/leave，SVG 分组在各浏览器上更稳
-      g.addEventListener('pointerover', (e) => {
-        if (!g.contains(e.relatedTarget)) focusRoute(g.dataset.cross);
-      });
-      g.addEventListener('pointerout', (e) => {
-        if (!g.contains(e.relatedTarget)) focusRoute(null);
-      });
-      g.addEventListener('focus', () => focusRoute(g.dataset.cross));
-      g.addEventListener('blur', () => focusRoute(null));
-
-      const go = () => {
-        const ev = events.find((e) => e.id === crossEvent[g.dataset.cross]);
-        if (!ev) return;
-        const entering = !sandboxEntered;
-        enterSandbox();
-        jumpToEvent(ev);
-        // 从总览点路线进入沙盘：落在该渡节点后继续自动播放；沙盘内点选节点只暂停
-        if (entering) scheduleAutoPlay();
-      };
-      g.addEventListener('click', go);
-      g.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          go();
-        }
-      });
-    });
-  })();
 
   function currentEvent(day) {
     let cur = null;
@@ -743,7 +760,7 @@
     }
     const id = ps.beat.narrs[k];
     showNarr(id);
-    const shouldSpeak = narrOn && !noZhVoice && !!NARR_MAP[id];
+    const shouldSpeak = narrOn && !noVoice && !!NARR_MAP[id];
     const ms = estSec(id) * 1000;
     // 有语音时以 onend 为准，这里只保留 8 秒下限，避免“闪一下就过”
     const minMs = shouldSpeak ? Math.min(8000, ms) : ms;
@@ -2085,6 +2102,19 @@
           }, 0)
         }))
       };
+      window.__csPlay = playState
+        ? {
+            i: playState.i,
+            day: playState.beat.day,
+            startDay: playState.startDay,
+            endDay: playState.endDay,
+            phase: playState.phase,
+            moveMs: playState.moveMs,
+            elapsed: performance.now() - playState.moveStart,
+            paused: playState.paused,
+            finished: playState.finished
+          }
+        : null;
     }
     void dt;
     void clock;
