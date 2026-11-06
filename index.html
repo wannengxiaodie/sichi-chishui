@@ -127,13 +127,16 @@
               <option value="tight">紧凑</option>
             </select>
           </label>
-          <label class="narr-field">语速
-            <select id="narrRate">
-              <option value="0.8">0.8</option>
-              <option value="0.9">0.9</option>
-              <option value="1">1.0</option>
-            </select>
-          </label>
+          <div class="narr-field">语速
+            <span class="rate-segs" id="narrRate" role="group" aria-label="语速档位">
+              <button type="button" class="rate-seg" data-rate="0.8" aria-pressed="false">0.8×</button>
+              <button type="button" class="rate-seg" data-rate="0.9" aria-pressed="false">0.9×</button>
+              <button type="button" class="rate-seg is-on" data-rate="1" aria-pressed="true">1.0×</button>
+              <button type="button" class="rate-seg" data-rate="1.25" aria-pressed="false">1.25×</button>
+              <button type="button" class="rate-seg" data-rate="1.5" aria-pressed="false">1.5×</button>
+              <button type="button" class="rate-seg" data-rate="2" aria-pressed="false">2.0×</button>
+            </span>
+          </div>
           <label class="narr-field">音量<input type="range" id="narrVol" min="0" max="1" step="0.1" value="1"></label>
         </div>
       </div>
@@ -216,68 +219,6 @@
         <span data-label="目的">秘密东返，跳出合围</span>
         <span data-label="结果">南渡乌江，兵锋贵阳，西进云南</span>
       </div>
-    </div>
-
-    <div class="schematic">
-      <p class="sch-title">来回穿插 · 路线示意</p>
-      <svg class="sch-svg" viewBox="0 0 1000 280" role="img" aria-label="四渡赤水往返示意">
-        <defs>
-          <marker id="schArrow" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="strokeWidth" markerWidth="3.3" markerHeight="3.3" orient="auto">
-            <path d="M10 5 L1.9 0.4 C4.7 2.3 5.6 3.3 5 5 C5.6 6.7 4.7 7.7 1.9 9.6 Z" fill="#d4553f"/>
-          </marker>
-        </defs>
-        <line x1="500" y1="30" x2="500" y2="252" stroke="#c9a961" stroke-opacity=".4" stroke-width="1.6" stroke-dasharray="4 8"/>
-        <text x="500" y="20" text-anchor="middle" fill="#9c8d75" font-size="13" letter-spacing="3">赤 水 河</text>
-
-        <g class="sch-route" data-cross="c1" tabindex="0" role="button" aria-label="一渡赤水，1935年1月29日，西进川南">
-          <path class="sch-hit" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96"/>
-          <path id="schP1" class="sch-halo" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96"/>
-          <path class="sch-line" d="M585 54 C548 50 528 56 500 60 C456 66 408 74 350 96" marker-end="url(#schArrow)"/>
-          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
-            <animateMotion dur="9s" repeatCount="indefinite" rotate="auto"><mpath href="#schP1"/></animateMotion>
-          </circle>
-        </g>
-
-        <g class="sch-route" data-cross="c2" tabindex="0" role="button" aria-label="二渡赤水，1935年2月18日，东返黔北">
-          <path class="sch-hit" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136"/>
-          <path id="schP2" class="sch-halo" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136"/>
-          <path class="sch-line" d="M330 122 C372 112 414 110 466 116 C536 124 596 128 672 136" marker-end="url(#schArrow)"/>
-          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
-            <animateMotion dur="8s" repeatCount="indefinite" rotate="auto"><mpath href="#schP2"/></animateMotion>
-          </circle>
-        </g>
-
-        <g class="sch-route" data-cross="c3" tabindex="0" role="button" aria-label="三渡赤水，1935年3月16日，再进川南">
-          <path class="sch-hit" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182"/>
-          <path id="schP3" class="sch-halo" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182"/>
-          <path class="sch-line" d="M678 158 C630 154 588 156 540 162 C468 170 408 172 344 182" marker-end="url(#schArrow)"/>
-          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
-            <animateMotion dur="10s" repeatCount="indefinite" rotate="auto"><mpath href="#schP3"/></animateMotion>
-          </circle>
-        </g>
-
-        <g class="sch-route" data-cross="c4" tabindex="0" role="button" aria-label="四渡赤水，1935年3月21日，东返后南下乌江">
-          <path class="sch-hit" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222"/>
-          <path id="schP4" class="sch-halo" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222"/>
-          <path class="sch-line" d="M326 202 C372 196 424 194 486 200 C566 208 620 210 688 222" marker-end="url(#schArrow)"/>
-          <circle class="sch-dot" r="2.1" fill="#ffc2a6">
-            <animateMotion dur="9s" repeatCount="indefinite" rotate="auto"><mpath href="#schP4"/></animateMotion>
-          </circle>
-        </g>
-
-        <g fill="#d9c4a1" font-size="13" letter-spacing="2" pointer-events="none">
-          <text x="300" y="44">一渡 · 1.29</text>
-          <text x="668" y="122">二渡 · 2.18</text>
-          <text x="330" y="158">三渡 · 3.16</text>
-          <text x="684" y="208">四渡 · 3.21</text>
-        </g>
-        <g fill="#9c8d75" font-size="11" letter-spacing="1.5" pointer-events="none">
-          <text x="292" y="110">西进川南</text>
-          <text x="700" y="168">东返黔北</text>
-          <text x="264" y="192">再进川南</text>
-          <text x="684" y="242">东返 · 南下乌江</text>
-        </g>
-      </svg>
     </div>
   </div>
 </section>
