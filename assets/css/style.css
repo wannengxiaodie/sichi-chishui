@@ -290,13 +290,35 @@ body {
   max-height: 1080px;
   overflow: hidden;
   background:
-    radial-gradient(ellipse at 50% 62%, #18231d 0%, #0d1410 52%, #070a08 100%);
+    radial-gradient(ellipse at 50% 46%, rgba(150, 104, 46, .22) 0%, rgba(64, 55, 30, .28) 34%, transparent 66%),
+    radial-gradient(ellipse at 50% 78%, rgba(120, 78, 34, .16), transparent 58%),
+    radial-gradient(ellipse at 50% 60%, #20261a 0%, #0f150f 52%, #070a08 100%);
 }
 
 .stage-canvas-wrap {
   position: absolute;
   inset: 0;
   z-index: 1;
+}
+
+/* 画面上方暖光 + 四周暗角：贴近参考片的胶片氛围 */
+.stage-canvas-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 18%, rgba(255, 172, 104, .13), transparent 56%);
+  mix-blend-mode: screen;
+}
+
+.stage-canvas-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 52%, transparent 40%, rgba(4, 8, 5, .4) 74%, rgba(3, 6, 4, .84) 100%);
 }
 
 #scene,
@@ -513,13 +535,13 @@ body {
 
 .lbl .txt {
   font-size: 11px;
-  letter-spacing: .1em;
-  color: #ded2b8;
+  letter-spacing: .07em;
+  color: #eae7d8;
   text-shadow: 0 1px 3px #000, 0 0 10px #000, 0 0 16px rgba(0, 0, 0, .9);
 }
 
-.lbl.city .dot { width: 5px; height: 5px; background: #e8d7ae; }
-.lbl.city .txt { font-size: 12.5px; color: #f2e5c8; letter-spacing: .14em; }
+.lbl.city .dot { width: 5px; height: 5px; background: #f0dfae; }
+.lbl.city .txt { font-size: 12.5px; color: #fff8e6; letter-spacing: .12em; }
 
 .lbl.river .dot { display: none; }
 .lbl.river .txt {
@@ -600,6 +622,42 @@ body {
   font-size: 9px;
   letter-spacing: .06em;
   color: rgba(150, 175, 187, .75);
+}
+
+/* 四渡木牌：红底白字竖排，细金边，参照纪录片沙盘里的战斗标牌 */
+.lbl.plaque {
+  padding: 9px 7px 11px;
+  background: linear-gradient(180deg, #ab2b1d 0%, #8d1b12 46%, #5c0f09 100%);
+  border: 1px solid rgba(236, 205, 150, .82);
+  border-radius: 1px;
+  box-shadow:
+    0 7px 18px rgba(0, 0, 0, .55),
+    inset 0 0 0 2px rgba(96, 18, 12, .72),
+    inset 0 0 0 3px rgba(236, 205, 150, .3),
+    0 0 20px rgba(178, 46, 26, .26);
+  opacity: .62;
+  transition: opacity .35s, box-shadow .35s, border-color .35s;
+}
+
+.lbl.plaque .txt {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-family: var(--kai);
+  font-size: 14.5px;
+  letter-spacing: .16em;
+  line-height: 1.12;
+  color: #fff6e6;
+  text-shadow: 0 1px 2px rgba(50, 6, 3, .9), 0 0 6px rgba(90, 12, 8, .7);
+}
+
+.lbl.plaque.active {
+  opacity: 1;
+  border-color: #ffe2b4;
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, .6),
+    inset 0 0 0 2px rgba(96, 18, 12, .72),
+    inset 0 0 0 3px rgba(255, 226, 180, .45),
+    0 0 26px rgba(214, 68, 40, .42);
 }
 
 /* 年代印章 */
@@ -1494,6 +1552,10 @@ body {
   .stage-canvas-wrap { height: 58svh; min-height: 360px; }
   .panel { margin: 0 8px; }
   .transport-hint { display: none; }
+  /* 窄屏只保留当前渡次的木牌，避免四块同时压住沙盘 */
+  .lbl.plaque { opacity: 0; visibility: hidden; padding: 6px 5px 7px; }
+  .lbl.plaque .txt { font-size: 11px; letter-spacing: .1em; }
+  .lbl.plaque.active { opacity: 1; visibility: visible; }
 }
 
 @media (prefers-reduced-motion: reduce) {
