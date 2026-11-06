@@ -930,6 +930,42 @@ body {
   accent-color: #a83326;
 }
 
+/* 语速分段控件：6 档紧凑排列，窄屏不换行错位 */
+.rate-segs {
+  display: inline-flex;
+  overflow: hidden;
+  background: rgba(20, 28, 23, .9);
+  border: 1px solid rgba(201, 169, 97, .3);
+  border-radius: 2px;
+}
+
+.rate-seg {
+  padding: 3px 5px;
+  font-family: var(--sans);
+  font-size: 9.5px;
+  line-height: 1.2;
+  color: var(--gold-dim);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid rgba(201, 169, 97, .18);
+  cursor: pointer;
+}
+
+.rate-seg:last-child { border-right: 0; }
+
+.rate-seg:hover { color: #e9d7b6; }
+
+.rate-seg.is-on {
+  color: #f6e7c8;
+  background: rgba(140, 48, 36, .55);
+}
+
+.rate-seg:focus-visible {
+  outline: 1px solid rgba(224, 150, 110, .8);
+  outline-offset: -2px;
+}
+
 /* 正在播报 */
 .panel.speaking { border-color: rgba(200, 80, 60, .55); }
 
@@ -1236,77 +1272,6 @@ body {
 .dir.w { color: #d9b98a; border-color: rgba(201, 169, 97, .45); }
 .dir.e { color: #9cc3b6; border-color: rgba(95, 154, 140, .5); }
 
-.schematic {
-  margin-top: 64px;
-  padding: 24px 26px 14px;
-  border: 1px solid var(--line);
-  background: linear-gradient(170deg, rgba(201, 169, 97, .05), rgba(0, 0, 0, .22)), rgba(15, 21, 17, .6);
-}
-
-.sch-title {
-  margin: 0 0 6px;
-  font-family: var(--sans);
-  font-size: 10px;
-  letter-spacing: .28em;
-  color: var(--gold-dim);
-}
-
-.schematic svg { display: block; width: 100%; height: auto; }
-
-.sch-route {
-  cursor: pointer;
-  outline: none;
-  transition: opacity .25s;
-}
-
-.sch-hit {
-  fill: none;
-  stroke: transparent;
-  stroke-width: 20;
-  pointer-events: stroke;
-}
-
-.sch-route .sch-halo,
-.sch-route .sch-line {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: stroke .25s, stroke-width .25s, opacity .25s;
-}
-
-.sch-route .sch-halo {
-  stroke: #7a2118;
-  stroke-width: 7.5;
-  opacity: .42;
-}
-
-.sch-route .sch-line {
-  stroke: #b23a2c;
-  stroke-width: 3.2;
-}
-
-.sch-route .sch-dot {
-  opacity: .45;
-  transition: opacity .25s;
-}
-
-.sch-route:hover .sch-halo,
-.sch-route.active .sch-halo,
-.sch-route:focus-visible .sch-halo { opacity: .9; stroke: #8d2a1f; }
-
-.sch-route:hover .sch-line,
-.sch-route.active .sch-line,
-.sch-route:focus-visible .sch-line {
-  stroke: #e0664d;
-  stroke-width: 3.5;
-  filter: drop-shadow(0 0 4px rgba(224, 102, 77, .55));
-}
-
-.sch-route:hover .sch-dot,
-.sch-route.active .sch-dot { opacity: .95; }
-
-.sch-route.dim { opacity: .34; }
-
 /* ==========================================================================
    尾章
    ========================================================================== */
@@ -1535,5 +1500,4 @@ body {
   html { scroll-behavior: auto; }
   .hero-enter i { animation: none; }
   .reveal { transition: none; }
-  .sch-dot { display: none; }
 }
